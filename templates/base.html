@@ -10,7 +10,6 @@
 
 <nav class="sidebar">
     <div class="logo">IB Competition</div>
-
     <div class="nav-links">
         <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint=='dashboard' %}active{% endif %}">Главная</a>
         <a href="{{ url_for('team')      }}" class="nav-link {% if request.endpoint=='team'      %}active{% endif %}">Команда</a>
@@ -30,7 +29,7 @@
     <div class="top-title">{{ page_title }}</div>
     <div class="avatar-menu">
         <span class="user-name">{{ g.user }}</span>
-        <img src="{{ url_for('static', filename='default-avatar.png') }}" alt="avatar" class="avatar" id="avatarBtn">
+        <img src="{{ url_for('static', filename='default-avatar.png') }}" class="avatar" id="avatarBtn">
         <div class="dropdown" id="dropdownMenu">
             <a href="{{ url_for('profile') }}">Профиль</a>
             <a href="{{ url_for('logout') }}">Выйти</a>
@@ -39,49 +38,41 @@
 </header>
 
 <main>
-    {% with msgs = get_flashed_messages(with_categories=True) %}
-      {% if msgs %}
-        {% for cat,msg in msgs %}
-          <div style="margin-bottom:12px;color:{% if cat=='error' %}#ff7070{% else %}var(--accent){% endif %};">
-              {{ msg }}
-          </div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
     {% block content %}{% endblock %}
 </main>
 
-<!-- inline‑JS -->
+<!-- inline‑script (тот же, что был)  -->
 <script>
 document.addEventListener('DOMContentLoaded',()=>{
 
   const avatarBtn=document.getElementById('avatarBtn');
   const avatarMenu=document.getElementById('dropdownMenu');
   if(avatarBtn){
-    avatarBtn.addEventListener('click',e=>{
-        e.stopPropagation();avatarMenu.classList.toggle('show');
-    });
-    document.addEventListener('click',()=>avatarMenu.classList.remove('show'));
+      avatarBtn.addEventListener('click',e=>{
+          e.stopPropagation();avatarMenu.classList.toggle('show');
+      });
+      document.addEventListener('click',()=>avatarMenu.classList.remove('show'));
   }
 
   document.querySelectorAll('.action-btn').forEach(btn=>{
-    const menu=btn.nextElementSibling;
-    btn.addEventListener('click',e=>{
-      e.preventDefault();e.stopPropagation();
-      menu.classList.toggle('show-menu');
-    });
+      const menu=btn.nextElementSibling;
+      btn.addEventListener('click',e=>{
+          e.preventDefault();e.stopPropagation();
+          menu.classList.toggle('show-menu');
+      });
   });
   document.addEventListener('click',()=>{
-    document.querySelectorAll('.action-menu.show-menu')
-            .forEach(m=>m.classList.remove('show-menu'));
+      document.querySelectorAll('.action-menu.show-menu')
+              .forEach(m=>m.classList.remove('show-menu'));
   });
 
-  document.querySelectorAll('[data-modal]').forEach(btn=>{
-    const modal=document.getElementById(btn.dataset.modal);
-    btn.addEventListener('click',()=>modal.classList.add('open'));
-    modal.querySelector('.close')
-         .addEventListener('click',()=>modal.classList.remove('open'));
-  });
+  /* модалка удаления аккаунта */
+  const delBtn=document.getElementById('delAccountBtn');
+  if(delBtn){
+      const modal=document.getElementById('delModal');
+      delBtn.addEventListener('click',()=>modal.classList.add('open'));
+      modal.querySelector('.close').addEventListener('click',()=>modal.classList.remove('open'));
+  }
 
 });
 </script>

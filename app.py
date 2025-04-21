@@ -74,16 +74,22 @@ def register():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']; password = request.form['password']
+        username = request.form['username']
+        password = request.form['password']
+
         conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT user_id, password, role FROM users WHERE username=%s", (username,))
-        row = cur.fetchone(); cur.close(); conn.close()
+        row = cur.fetchone()
+        cur.close(); conn.close()
 
         if row and check_password_hash(row[1], password):
             session.update({'user_id': row[0], 'username': username, 'role': row[2]})
-            flash('Вход выполнен')
             return redirect(url_for('dashboard'))
-        flash('Неверный логин или пароль', 'error')
+
+        # неудача → показываем ошибку прямо на форме
+        error = 'Неверный логин или пароль'
+        return render_template('login.html', error=error)
+
     return render_template('login.html')
 
 @app.route('/logout')
@@ -114,15 +120,19 @@ def user_stats(uid):
     cur.close(); conn.close()
     return {'total': total or 0, 'wins': wins or 0}
 
-@app.route('/profile', methods=['GET'])
+# ─────────────────────────── ПРОФИЛЬ ─────────────────────────
+@app.route('/profile')
 @login_required
 def profile():
-    page = max(int(request.args.get('page', 1)), 1)
+    # ▸ статистика
+    page  = max(int(request.args.get('page', 1)), 1)
     offset = (page - 1) * EVENTS_PER_PAGE
-
     stats = user_stats(session['user_id'])
 
     conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT is_blocked FROM users WHERE user_id=%s", (session['user_id'],))
+    is_blocked = cur.fetchone()[0]
+
     cur.execute("""
         SELECT e.date, e.name, mt.team_name, wt.team_name
         FROM events e
@@ -134,39 +144,66 @@ def profile():
         LIMIT %s OFFSET %s
     """, (session['user_id'], EVENTS_PER_PAGE, offset))
     history = [{'date': r[0], 'name': r[1], 'my_team': r[2], 'winner': r[3]} for r in cur.fetchall()]
+
     cur.execute("SELECT COUNT(*) FROM event_participants WHERE user_id=%s", (session['user_id'],))
-    total = cur.fetchone()[0]; pages = (total + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE
+    total = cur.fetchone()[0]
+    pages = (total + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE
+
     cur.close(); conn.close()
 
-    return render_template('profile.html', page_title='Профиль',
-                           stats=stats, history=history, page=page, pages=pages)
+    # ▸ сообщения о смене пароля
+    pass_msg = request.args.get('pm')
+    pass_ok  = (request.args.get('ok') == '1')
 
+    return render_template('profile.html',
+                           page_title='Профиль',
+                           stats=stats,
+                           is_blocked=is_blocked,
+                           history=history,
+                           page=page, pages=pages,
+                           pass_msg=pass_msg, pass_ok=pass_ok)
+
+# ──────────────────────── СМЕНА ПАРОЛЯ ───────────────────────
 @app.route('/change_password', methods=['POST'])
 @login_required
 def change_password():
-    old = request.form['old']; new = request.form['new']
+    old = request.form['old']
+    new = request.form['new']
+
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT password FROM users WHERE user_id=%s", (session['user_id'],))
-    if check_password_hash(cur.fetchone()[0], old):
+    stored_hash = cur.fetchone()[0]
+
+    if check_password_hash(stored_hash, old):
         cur.execute("UPDATE users SET password=%s WHERE user_id=%s",
                     (generate_password_hash(new), session['user_id']))
-        conn.commit(); flash('Пароль обновлён')
-    else:
-        flash('Старый пароль неверен', 'error')
-    cur.close(); conn.close()
-    return redirect(url_for('profile'))
+        conn.commit()
+        cur.close(); conn.close()
+        # ok=1 → зелёный текст, ok=0 → красный
+        return redirect(url_for('profile', pm='Пароль обновлён', ok=1))
 
+    cur.close(); conn.close()
+    return redirect(url_for('profile', pm='Старый пароль неверен', ok=0))
+
+# ───────────────────── УДАЛЕНИЕ АККАУНТА ────────────────────
 @app.route('/delete_account', methods=['POST'])
 @login_required
 def delete_account():
     pwd = request.form['pwd']
+
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT password FROM users WHERE user_id=%s", (session['user_id'],))
-    if check_password_hash(cur.fetchone()[0], pwd):
+    stored_hash = cur.fetchone()[0]
+
+    if check_password_hash(stored_hash, pwd):
         cur.execute("DELETE FROM users WHERE user_id=%s", (session['user_id'],))
-        conn.commit(); session.clear(); flash('Аккаунт удалён')
-        return redirect(url_for('index'))
-    flash('Пароль неверен', 'error'); return redirect(url_for('profile'))
+        conn.commit()
+        cur.close(); conn.close()
+        session.clear()
+        return redirect(url_for('index'))      # без flash‑сообщений
+
+    cur.close(); conn.close()
+    return redirect(url_for('profile', pm='Пароль неверен', ok=0))
 
 # ────── работа с командами ──────
 def current_team():

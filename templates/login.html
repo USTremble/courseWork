@@ -10,6 +10,9 @@
 <div class="auth-wrapper">
     <div class="auth-box">
         <h1>Вход</h1>
+        {% if error %}
+           <p style="color:#ff7070;text-align:center">{{ error }}</p>
+        {% endif %}
         <form method="POST">
             <label>Логин</label>
             <input type="text" name="username" required>
