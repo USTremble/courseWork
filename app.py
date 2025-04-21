@@ -1,17 +1,14 @@
 from flask import (
-    Flask, render_template, request, redirect, url_for,
-    flash, session, g
+    Flask, render_template, request, redirect,
+    url_for, flash, session, g
 )
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
-import psycopg2
-from werkzeug.utils import secure_filename
-import os, uuid
+import psycopg2, os
 
+# ────── базовая инициализация ──────
 app = Flask(__name__, template_folder='templates', static_folder='static')
-app.secret_key = '777'
-AVATAR_DIR = os.path.join(app.static_folder, 'avatars')
-os.makedirs(AVATAR_DIR, exist_ok=True)
+app.secret_key = '777'                         # в продакшне вынести в переменные среды
 
 def get_db_connection():
     return psycopg2.connect(
@@ -22,13 +19,22 @@ def get_db_connection():
         port='5432'
     )
 
-# ─────────────────────────── auth helpers ────────────────────────
+# ────── декораторы ──────
 def login_required(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if 'user_id' not in session:
-            flash('Пожалуйста, войдите в систему.')
+            flash('Пожалуйста, войдите в систему.', 'error')
             return redirect(url_for('login'))
+        return view(*args, **kwargs)
+    return wrapped
+
+def admin_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if session.get('role') != 'admin':
+            flash('Доступ только администратору', 'error')
+            return redirect(url_for('dashboard'))
         return view(*args, **kwargs)
     return wrapped
 
@@ -36,71 +42,48 @@ def login_required(view):
 def load_logged_user():
     g.user = session.get('username')
 
-def admin_required(view):
-    from functools import wraps
-    @wraps(view)
-    def wrapped(*a, **kw):
-        if session.get('role') != 'admin':
-            flash('Доступ только администратору')
-            return redirect(url_for('dashboard'))
-        return view(*a, **kw)
-    return wrapped
-
-# ─────────────────────────── регистрация ─────────────────────────
+# ────── регистрация ──────
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     if request.method == 'POST':
-        username         = request.form['username']
-        password         = request.form['password']
-        confirm_password = request.form['confirm_password']
+        username = request.form['username']
+        password = request.form['password']
+        confirm  = request.form['confirm_password']
 
-        if password != confirm_password:
-            flash('Пароли не совпадают!')
+        if password != confirm:
+            flash('Пароли не совпадают!', 'error')
             return redirect(url_for('register'))
 
-        conn = get_db_connection()
-        cur  = conn.cursor()
-        cur.execute("SELECT user_id FROM users WHERE username=%s", (username,))
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT 1 FROM users WHERE username=%s", (username,))
         if cur.fetchone():
-            flash('Такой пользователь уже существует!')
-            cur.close(); conn.close()
-            return redirect(url_for('register'))
+            flash('Такой пользователь уже существует!', 'error')
+            cur.close(); conn.close(); return redirect(url_for('register'))
 
-        hashed = generate_password_hash(password)
-        try:
-            cur.execute("""
-                INSERT INTO users (username, password, role)
-                VALUES (%s, %s, 'player') RETURNING user_id
-            """, (username, hashed))
-            user_id = cur.fetchone()[0]
-            conn.commit()
-            session.update({'user_id': user_id, 'username': username, 'role': 'player'})
-            flash('Добро пожаловать — вы зарегистрированы!')
-            return redirect(url_for('dashboard'))
-        except Exception as e:
-            conn.rollback()
-            flash(f'Ошибка регистрации: {e}')
-        finally:
-            cur.close(); conn.close()
+        cur.execute("""
+            INSERT INTO users (username, password, role)
+            VALUES (%s, %s, 'player') RETURNING user_id
+        """, (username, generate_password_hash(password)))
+        session.update({'user_id': cur.fetchone()[0], 'username': username, 'role': 'player'})
+        conn.commit(); cur.close(); conn.close()
+        flash('Добро пожаловать! Аккаунт создан.')
+        return redirect(url_for('dashboard'))
     return render_template('register.html')
 
-# ─────────────────────────── вход / выход ────────────────────────
+# ────── вход / выход ──────
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        conn = get_db_connection()
-        cur  = conn.cursor()
+        username = request.form['username']; password = request.form['password']
+        conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT user_id, password, role FROM users WHERE username=%s", (username,))
-        row = cur.fetchone()
-        cur.close(); conn.close()
+        row = cur.fetchone(); cur.close(); conn.close()
 
         if row and check_password_hash(row[1], password):
             session.update({'user_id': row[0], 'username': username, 'role': row[2]})
-            flash('Успешный вход!')
+            flash('Вход выполнен')
             return redirect(url_for('dashboard'))
-        flash('Неверный логин или пароль!')
+        flash('Неверный логин или пароль', 'error')
     return render_template('login.html')
 
 @app.route('/logout')
@@ -110,7 +93,7 @@ def logout():
     flash('Вы вышли из системы.')
     return redirect(url_for('index'))
 
-# ───── верхние (авторизованные) маршруты ─────
+# ────── главные страницы ──────
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -121,87 +104,149 @@ def dashboard():
 def events():
     return render_template('events.html', page_title='События')
 
-# вспомогательные выборки
+# ────── профиль игрока ──────
+EVENTS_PER_PAGE = 10
 def user_stats(uid):
     conn=get_db_connection(); cur=conn.cursor()
     cur.execute("SELECT COUNT(*), SUM(CASE WHEN is_winner THEN 1 ELSE 0 END) "
-                "FROM event_participants WHERE user_id=%s",(uid,))
-    total,wins = cur.fetchone()
+                "FROM event_participants WHERE user_id=%s", (uid,))
+    total, wins = cur.fetchone()
     cur.close(); conn.close()
-    return {'total':total or 0,'wins':wins or 0}
-
-EVENTS_PER_PAGE=10
+    return {'total': total or 0, 'wins': wins or 0}
 
 @app.route('/profile', methods=['GET'])
 @login_required
 def profile():
-    page=max(int(request.args.get('page',1)),1)
-    offset=(page-1)*EVENTS_PER_PAGE
+    page = max(int(request.args.get('page', 1)), 1)
+    offset = (page - 1) * EVENTS_PER_PAGE
 
-    stats=user_stats(session['user_id'])
+    stats = user_stats(session['user_id'])
 
-    conn=get_db_connection(); cur=conn.cursor()
+    conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""
-        SELECT e.date,e.name,mt.team_name,wt.team_name
+        SELECT e.date, e.name, mt.team_name, wt.team_name
         FROM events e
-        JOIN event_participants ep ON ep.event_id=e.event_id
-        JOIN teams mt ON mt.team_id=ep.team_id
-        JOIN teams wt ON wt.team_id=e.winner_team_id
-        WHERE ep.user_id=%s
+        JOIN event_participants ep ON ep.event_id = e.event_id
+        JOIN teams mt ON mt.team_id = ep.team_id
+        JOIN teams wt ON wt.team_id = e.winner_team_id
+        WHERE ep.user_id = %s
         ORDER BY e.date DESC
         LIMIT %s OFFSET %s
-    """,(session['user_id'],EVENTS_PER_PAGE,offset))
-    history=[{'date':r[0],'name':r[1],'my_team':r[2],'winner':r[3]} for r in cur.fetchall()]
-
-    cur.execute("SELECT COUNT(*) FROM event_participants WHERE user_id=%s",(session['user_id'],))
-    total=cur.fetchone()[0]; pages=(total+EVENTS_PER_PAGE-1)//EVENTS_PER_PAGE
+    """, (session['user_id'], EVENTS_PER_PAGE, offset))
+    history = [{'date': r[0], 'name': r[1], 'my_team': r[2], 'winner': r[3]} for r in cur.fetchall()]
+    cur.execute("SELECT COUNT(*) FROM event_participants WHERE user_id=%s", (session['user_id'],))
+    total = cur.fetchone()[0]; pages = (total + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE
     cur.close(); conn.close()
 
-    return render_template('profile.html',page_title='Профиль',
-                           stats=stats,history=history,page=page,pages=pages)
+    return render_template('profile.html', page_title='Профиль',
+                           stats=stats, history=history, page=page, pages=pages)
 
-# смена пароля
 @app.route('/change_password', methods=['POST'])
 @login_required
 def change_password():
-    old=request.form['old']; new=request.form['new']
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT password FROM users WHERE user_id=%s",(session['user_id'],))
-    if check_password_hash(cur.fetchone()[0],old):
+    old = request.form['old']; new = request.form['new']
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT password FROM users WHERE user_id=%s", (session['user_id'],))
+    if check_password_hash(cur.fetchone()[0], old):
         cur.execute("UPDATE users SET password=%s WHERE user_id=%s",
-                    (generate_password_hash(new),session['user_id']))
+                    (generate_password_hash(new), session['user_id']))
         conn.commit(); flash('Пароль обновлён')
     else:
-        flash('Старый пароль неверен')
+        flash('Старый пароль неверен', 'error')
     cur.close(); conn.close()
     return redirect(url_for('profile'))
 
-# удаление аккаунта
 @app.route('/delete_account', methods=['POST'])
 @login_required
 def delete_account():
-    pwd=request.form['pwd']
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT password FROM users WHERE user_id=%s",(session['user_id'],))
-    if check_password_hash(cur.fetchone()[0],pwd):
-        cur.execute("DELETE FROM users WHERE user_id=%s",(session['user_id'],))
+    pwd = request.form['pwd']
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT password FROM users WHERE user_id=%s", (session['user_id'],))
+    if check_password_hash(cur.fetchone()[0], pwd):
+        cur.execute("DELETE FROM users WHERE user_id=%s", (session['user_id'],))
         conn.commit(); session.clear(); flash('Аккаунт удалён')
         return redirect(url_for('index'))
-    flash('Пароль неверен'); return redirect(url_for('profile'))
+    flash('Пароль неверен', 'error'); return redirect(url_for('profile'))
 
-# ───── АДМИН‑страницы ─────
+# ────── работа с командами ──────
+def current_team():
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute("""SELECT t.team_id,t.team_name,t.description
+                   FROM teams t JOIN team_members tm ON t.team_id=tm.team_id
+                   WHERE tm.user_id=%s""", (session['user_id'],))
+    team = cur.fetchone()
+    if not team:
+        cur.close(); conn.close(); return None, None
+    cur.execute("""SELECT u.user_id,u.username
+                   FROM users u JOIN team_members tm ON tm.user_id=u.user_id
+                   WHERE tm.team_id=%s""", (team[0],))
+    members = [{'user_id': r[0], 'username': r[1]} for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return {'team_id': team[0], 'team_name': team[1], 'description': team[2]}, members
+
+@app.route('/team', methods=['GET'])
+@login_required
+def team():
+    team_info, members = current_team()
+    return render_template('team.html', page_title='Команда',
+                           team=team_info, members=members)
+
+@app.route('/create_team', methods=['POST'])
+@login_required
+def create_team():
+    name = request.form['team_name']; desc = request.form['description']; code = request.form['invite_code']
+    conn = get_db_connection(); cur = conn.cursor()
+    try:
+        cur.execute("INSERT INTO teams (team_name, description, invite_code) VALUES (%s, %s, %s) RETURNING team_id",
+                    (name, desc, code))
+        tid = cur.fetchone()[0]
+        cur.execute("INSERT INTO team_members (team_id, user_id) VALUES (%s, %s)", (tid, session['user_id']))
+        conn.commit(); flash('Команда создана')
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback(); flash('Имя команды или код уже существуют', 'error')
+    finally:
+        cur.close(); conn.close()
+    return redirect(url_for('team'))
+
+@app.route('/join_team', methods=['POST'])
+@login_required
+def join_team():
+    code = request.form['invite_code']
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT team_id FROM teams WHERE invite_code=%s", (code,))
+    row = cur.fetchone()
+    if row:
+        cur.execute("""
+            INSERT INTO team_members (team_id, user_id)
+            VALUES (%s, %s) ON CONFLICT DO NOTHING
+        """, (row[0], session['user_id']))
+        conn.commit(); flash('Вы присоединились к команде')
+    else:
+        flash('Неверный код приглашения', 'error')
+    cur.close(); conn.close()
+    return redirect(url_for('team'))
+
+@app.route('/leave_team', methods=['POST'])
+@login_required
+def leave_team():
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("DELETE FROM team_members WHERE user_id=%s", (session['user_id'],))
+    conn.commit(); cur.close(); conn.close()
+    flash('Вы покинули команду')
+    return redirect(url_for('team'))
+
+# ────── admin: таблицы ──────
 PER_PAGE = 10
 
 @app.route('/admin/users')
 @admin_required
 def admin_users():
-    page  = max(int(request.args.get('page', 1)), 1)
-    q     = request.args.get('q', '').strip()
-    sort  = request.args.get('sort', 'user_id')
-    order = request.args.get('dir', 'asc')
-
-    allowed_sort = {'user_id', 'username', 'role'}
-    if sort not in allowed_sort: sort = 'user_id'
+    page = max(int(request.args.get('page', 1)), 1)
+    q    = request.args.get('q', '').strip()
+    sort = request.args.get('sort', 'user_id')
+    order= request.args.get('dir', 'asc')
+    allowed = {'user_id', 'username', 'role'}
+    if sort not in allowed: sort = 'user_id'
     order_sql = 'ASC' if order == 'asc' else 'DESC'
 
     base_sql = """
@@ -212,9 +257,10 @@ def admin_users():
         LEFT JOIN team_members tm ON tm.user_id = u.user_id
         LEFT JOIN teams t ON t.team_id = tm.team_id
     """
-    where, params = '', []
+    where = ''; params = []
     if q:
-        where = "WHERE CAST(u.user_id AS TEXT) ILIKE %s OR u.username ILIKE %s OR t.team_name ILIKE %s"
+        where = ("WHERE CAST(u.user_id AS TEXT) ILIKE %s OR "
+                 "u.username ILIKE %s OR t.team_name ILIKE %s")
         params = [f'%{q}%'] * 3
     group = "GROUP BY u.user_id"
     order_by = f"ORDER BY {sort} {order_sql}"
@@ -224,14 +270,11 @@ def admin_users():
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute(f"{base_sql} {where} {group} {order_by} {limit}", params)
     users = cur.fetchall()
-
-    # всего записей (для пагинации)
     cur.execute(f"SELECT COUNT(DISTINCT u.user_id) FROM users u "
-                f"LEFT JOIN teams t ON TRUE {where}", params[:-2])
-    total = cur.fetchone()[0]
-    conn.close()
+                f"LEFT JOIN team_members tm ON TRUE {where}", params[:-2])
+    total = cur.fetchone()[0]; pages = (total + PER_PAGE - 1) // PER_PAGE
+    cur.close(); conn.close()
 
-    pages = (total + PER_PAGE - 1) // PER_PAGE
     return render_template('admin_users.html', page_title='Пользователи',
                            users=users, page=page, pages=pages,
                            q=q, sort=sort, order=order)
@@ -239,12 +282,12 @@ def admin_users():
 @app.route('/admin/teams')
 @admin_required
 def admin_teams():
-    page  = max(int(request.args.get('page', 1)), 1)
-    q     = request.args.get('q', '').strip()
-    sort  = request.args.get('sort', 'team_id')
-    order = request.args.get('dir', 'asc')
-    allowed_sort = {'team_id', 'team_name', 'members'}
-    if sort not in allowed_sort: sort = 'team_id'
+    page = max(int(request.args.get('page', 1)), 1)
+    q    = request.args.get('q', '').strip()
+    sort = request.args.get('sort', 'team_id')
+    order= request.args.get('dir', 'asc')
+    allowed = {'team_id', 'team_name', 'members'}
+    if sort not in allowed: sort = 'team_id'
     order_sql = 'ASC' if order == 'asc' else 'DESC'
 
     base_sql = """
@@ -254,9 +297,10 @@ def admin_teams():
         FROM teams t
         LEFT JOIN team_members tm ON tm.team_id = t.team_id
     """
-    where, params = '', []
+    where = ''; params = []
     if q:
-        where = "WHERE CAST(t.team_id AS TEXT) ILIKE %s OR t.team_name ILIKE %s OR CAST(tm.user_id AS TEXT) ILIKE %s"
+        where = ("WHERE CAST(t.team_id AS TEXT) ILIKE %s OR "
+                 "t.team_name ILIKE %s OR CAST(tm.user_id AS TEXT) ILIKE %s")
         params = [f'%{q}%'] * 3
     group = "GROUP BY t.team_id"
     order_by = f"ORDER BY {sort} {order_sql}"
@@ -266,96 +310,51 @@ def admin_teams():
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute(f"{base_sql} {where} {group} {order_by} {limit}", params)
     teams = cur.fetchall()
-
     cur.execute(f"SELECT COUNT(DISTINCT t.team_id) FROM teams t "
                 f"LEFT JOIN team_members tm ON tm.team_id = t.team_id {where}", params[:-2])
-    total = cur.fetchone()[0]
-    conn.close()
+    total = cur.fetchone()[0]; pages = (total + PER_PAGE - 1) // PER_PAGE
+    cur.close(); conn.close()
 
-    pages = (total + PER_PAGE - 1) // PER_PAGE
     return render_template('admin_teams.html', page_title='Команды',
                            teams=teams, page=page, pages=pages,
                            q=q, sort=sort, order=order)
 
+# ────── admin‑действия ──────
 @app.route('/admin/user_action', methods=['POST'])
 @admin_required
 def admin_user_action():
-    uid=request.form['uid']; action=request.form['act']
-    conn=get_db_connection(); cur=conn.cursor()
-    if action=='delete':
-        cur.execute("DELETE FROM users WHERE user_id=%s",(uid,))
-    elif action=='moder':
-        cur.execute("UPDATE users SET role='moderator' WHERE user_id=%s",(uid,))
-    elif action=='toggle':
-        cur.execute("UPDATE users SET is_blocked=NOT COALESCE(is_blocked,false) WHERE user_id=%s",(uid,))
+    uid = request.form['uid']; act = request.form['act']
+    conn = get_db_connection(); cur = conn.cursor()
+    if act == 'delete':
+        cur.execute("DELETE FROM users WHERE user_id=%s", (uid,))
+    elif act == 'moder':
+        cur.execute("UPDATE users SET role='moderator' WHERE user_id=%s", (uid,))
+    elif act == 'toggle':
+        cur.execute("UPDATE users SET is_blocked = NOT is_blocked WHERE user_id=%s", (uid,))
     conn.commit(); cur.close(); conn.close()
     return redirect(request.referrer or url_for('admin_users'))
 
-
-# ────── Team helpers & routes ──────
-def current_team():
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("""SELECT t.team_id,t.team_name,t.description
-                   FROM teams t JOIN team_members tm ON t.team_id=tm.team_id
-                   WHERE tm.user_id=%s""",(session['user_id'],))
-    team=cur.fetchone()
-    if not team: return None,None
-    cur.execute("""SELECT u.user_id,u.username FROM users u
-                   JOIN team_members tm ON tm.user_id=u.user_id
-                   WHERE tm.team_id=%s""",(team[0],))
-    members=[{'user_id':r[0],'username':r[1]} for r in cur.fetchall()]
-    cur.close(); conn.close()
-    return {'team_id':team[0],'team_name':team[1],'description':team[2]}, members
-
-@app.route('/team', methods=['GET'])
-@login_required
-def team():
-    team,members=current_team()
-    return render_template('team.html', page_title='Команда', team=team, members=members)
-
-@app.route('/create_team', methods=['POST'])
-@login_required
-def create_team():
-    name=request.form['team_name']; desc=request.form['description']; code=request.form['invite_code']
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("INSERT INTO teams (team_name,description,invite_code) VALUES (%s,%s,%s) RETURNING team_id",
-                (name,desc,code))
-    tid=cur.fetchone()[0]
-    cur.execute("INSERT INTO team_members (team_id,user_id) VALUES (%s,%s)", (tid,session['user_id']))
+@app.route('/admin/team_action', methods=['POST'])
+@admin_required
+def admin_team_action():
+    tid = request.form['tid']; act = request.form['act']
+    conn = get_db_connection(); cur = conn.cursor()
+    if act == 'delete':
+        cur.execute("DELETE FROM teams WHERE team_id=%s", (tid,))
+    elif act == 'disband':
+        cur.execute("DELETE FROM team_members WHERE team_id=%s", (tid,))
+    elif act == 'kick':
+        uid = request.form.get('uid')
+        if uid:
+            cur.execute("DELETE FROM team_members WHERE team_id=%s AND user_id=%s", (tid, uid))
     conn.commit(); cur.close(); conn.close()
-    flash('Команда создана'); return redirect(url_for('team'))
+    return redirect(request.referrer or url_for('admin_teams'))
 
-@app.route('/join_team', methods=['POST'])
-@login_required
-def join_team():
-    code=request.form['invite_code']
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT team_id FROM teams WHERE invite_code=%s",(code,))
-    row=cur.fetchone()
-    if row:
-        cur.execute("INSERT INTO team_members (team_id,user_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",
-                    (row[0],session['user_id']))
-        conn.commit(); flash('Вы присоединились к команде')
-    else:
-        flash('Неверный код приглашения')
-    cur.close(); conn.close()
-    return redirect(url_for('team'))
-
-@app.route('/leave_team', methods=['POST'])
-@login_required
-def leave_team():
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("DELETE FROM team_members WHERE user_id=%s",(session['user_id'],))
-    conn.commit(); cur.close(); conn.close()
-    flash('Вы покинули команду')
-    return redirect(url_for('team'))
-
-
-# ─────────────────────────── публичная корневая ──────────────────
+# ────── публичная корневая ──────
 @app.route('/')
 def index():
     return redirect(url_for('dashboard')) if g.user else render_template('index.html')
 
-# ─────────────────────────────────────────────────────────────────
+# ────── запуск ──────
 if __name__ == '__main__':
     app.run(debug=True)

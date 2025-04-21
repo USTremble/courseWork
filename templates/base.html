@@ -8,7 +8,6 @@
 </head>
 <body>
 
-<!-- sidebar -->
 <nav class="sidebar">
     <div class="logo">IB Competition</div>
 
@@ -27,14 +26,11 @@
     </div>
 </nav>
 
-<!-- top‑bar -->
 <header class="topbar">
     <div class="top-title">{{ page_title }}</div>
-
     <div class="avatar-menu">
         <span class="user-name">{{ g.user }}</span>
-        <img src="{{ url_for('static', filename='default-avatar.png') }}"
-             alt="avatar" class="avatar" id="avatarBtn">
+        <img src="{{ url_for('static', filename='default-avatar.png') }}" alt="avatar" class="avatar" id="avatarBtn">
         <div class="dropdown" id="dropdownMenu">
             <a href="{{ url_for('profile') }}">Профиль</a>
             <a href="{{ url_for('logout') }}">Выйти</a>
@@ -42,9 +38,52 @@
     </div>
 </header>
 
-<!-- контент -->
-<main>{% block content %}{% endblock %}</main>
+<main>
+    {% with msgs = get_flashed_messages(with_categories=True) %}
+      {% if msgs %}
+        {% for cat,msg in msgs %}
+          <div style="margin-bottom:12px;color:{% if cat=='error' %}#ff7070{% else %}var(--accent){% endif %};">
+              {{ msg }}
+          </div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+</main>
 
-<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+<!-- inline‑JS -->
+<script>
+document.addEventListener('DOMContentLoaded',()=>{
+
+  const avatarBtn=document.getElementById('avatarBtn');
+  const avatarMenu=document.getElementById('dropdownMenu');
+  if(avatarBtn){
+    avatarBtn.addEventListener('click',e=>{
+        e.stopPropagation();avatarMenu.classList.toggle('show');
+    });
+    document.addEventListener('click',()=>avatarMenu.classList.remove('show'));
+  }
+
+  document.querySelectorAll('.action-btn').forEach(btn=>{
+    const menu=btn.nextElementSibling;
+    btn.addEventListener('click',e=>{
+      e.preventDefault();e.stopPropagation();
+      menu.classList.toggle('show-menu');
+    });
+  });
+  document.addEventListener('click',()=>{
+    document.querySelectorAll('.action-menu.show-menu')
+            .forEach(m=>m.classList.remove('show-menu'));
+  });
+
+  document.querySelectorAll('[data-modal]').forEach(btn=>{
+    const modal=document.getElementById(btn.dataset.modal);
+    btn.addEventListener('click',()=>modal.classList.add('open'));
+    modal.querySelector('.close')
+         .addEventListener('click',()=>modal.classList.remove('open'));
+  });
+
+});
+</script>
 </body>
 </html>

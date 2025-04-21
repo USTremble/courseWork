@@ -1,30 +1,29 @@
 {% extends 'base.html' %}
 {% block title %}Команды{% endblock %}
 {% block content %}
-
 <h1>Команды</h1>
 
 <form style="margin-bottom:12px">
     <input type="text" name="q" placeholder="Поиск по TID / названию / UID участника"
            value="{{ q }}" style="padding:6px 8px;width:280px">
-    <button class="btn btn-primary">Поиск</button>
+    <button class="btn">Поиск</button>
 </form>
 
 <div class="content-box">
 <table class="admin-table">
     <thead>
         {% set dir_icon = '↑' if order=='asc' else '↓' %}
-        {% macro s_link(f,t) -%}
-            <a href="{{ url_for('admin_teams', q=q, sort=f,
-                                 dir='desc' if sort==f and order=='asc' else 'asc') }}">
-                {{ t }}{% if sort==f %} {{ dir_icon }}{% endif %}
-            </a>
-        {%- endmacro %}
+        {% macro s(field,label) %}
+           <a href="{{ url_for('admin_teams', q=q, sort=field,
+                               dir='desc' if sort==field and order=='asc' else 'asc') }}">
+              {{ label }}{% if sort==field %} {{ dir_icon }}{% endif %}
+           </a>
+        {% endmacro %}
         <tr>
-            <th class="col-uid">{{ s_link('team_id','TID') }}</th>
-            <th class="col-login">{{ s_link('team_name','Имя команды') }}</th>
+            <th class="col-uid">{{ s('team_id','TID') }}</th>
+            <th class="col-login">{{ s('team_name','Имя команды') }}</th>
             <th class="col-team">UID участников</th>
-            <th class="col-role">{{ s_link('members','Кол‑во') }}</th>
+            <th class="col-members">{{ s('members','Количество участников') }}</th>
             <th class="col-action">Действие</th>
         </tr>
     </thead>
@@ -36,15 +35,17 @@
             <td>{{ t[2] if t[2] else '—' }}</td>
             <td>{{ t[3] }}</td>
             <td>
-                <div class="action-menu">
-                    <form method="post" action="{{ url_for('admin_user_action') }}">
-                       <input type="hidden" name="uid" value="{{ u[0] }}">
-                       <button name="act" value="kick_member">Исключить участника</button>
-                       <button name="act" value="disband">Расформировать команду</button>
-                       <button name="act" value="delete_team" style="color:#e66">Удалить команду</button>
-                    </form>
-                  </div>
-                  
+                <div class="action-wrapper">
+                    <a href="#" class="action-btn">Выполнить&nbsp;действие</a>
+                    <div class="action-menu">
+                        <form method="post" action="{{ url_for('admin_team_action') }}">
+                            <input type="hidden" name="tid" value="{{ t[0] }}">
+                            <button name="act" value="delete">Удалить команду</button>
+                            <button name="act" value="disband">Расформировать</button>
+                            <button name="act" value="kick">Исключить участника</button>
+                        </form>
+                    </div>
+                </div>
             </td>
         </tr>
     {% endfor %}
@@ -54,11 +55,8 @@
 
 <div class="table-pagination">
 {% for p in range(1, pages+1) %}
-    {% if p == page %}<strong>{{ p }}</strong>
-    {% else %}
-        <a href="{{ url_for('admin_teams', page=p, q=q, sort=sort, dir=order) }}">{{ p }}</a>
-    {% endif %}
+   {% if p==page %}<strong>{{ p }}</strong>
+   {% else %}<a href="{{ url_for('admin_teams', page=p, q=q, sort=sort, dir=order) }}">{{ p }}</a>{% endif %}
 {% endfor %}
 </div>
-
 {% endblock %}

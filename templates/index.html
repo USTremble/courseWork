@@ -7,19 +7,17 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/public.css') }}">
 </head>
 <body>
-    <!-- верхняя публичная шапка -->
-    <header class="topbar-public">
-        <div class="brand">IB Competition</div>
-        <div class="auth-links">
-            <a href="{{ url_for('login') }}"    class="btn btn-outline">Вход</a>
-            <a href="{{ url_for('register') }}" class="btn btn-primary">Регистрация</a>
-        </div>
-    </header>
+<header class="topbar-public">
+    <div class="brand">IB Competition</div>
+    <div class="auth-links">
+        <a href="{{ url_for('login') }}"    class="btn btn-outline">Вход</a>
+        <a href="{{ url_for('register') }}" class="btn btn-primary">Регистрация</a>
+    </div>
+</header>
 
-    <!-- будущий контент. пока просто заглушка -->
-    <main style="padding-top:100px;text-align:center;color:var(--font-light)">
-        <h1>Добро пожаловать!</h1>
-        <p>Скоро здесь появится информация о платформе, преимуществах и событиях.</p>
-    </main>
+<main style="padding-top:100px;text-align:center">
+    <h1>Добро пожаловать!</h1>
+    <p>На этой платформе проходят соревнования. Войдите или зарегистрируйтесь, чтобы участвовать.</p>
+</main>
 </body>
 </html>

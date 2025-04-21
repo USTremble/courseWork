@@ -10,18 +10,16 @@
 <div class="auth-wrapper">
     <div class="auth-box">
         <h1>Регистрация</h1>
-        <form method="POST" action="{{ url_for('register') }}">
+        <form method="POST">
             <label>Логин</label>
             <input type="text" name="username" required>
             <label>Пароль</label>
             <input type="password" name="password" required>
             <label>Повторите пароль</label>
             <input type="password" name="confirm_password" required>
-            <button type="submit">Зарегистрироваться</button>
+            <button>Зарегистрироваться</button>
         </form>
-        <p>Уже есть аккаунт?
-           <a href="{{ url_for('login') }}">Войти</a>
-        </p>
+        <p>Уже есть аккаунт? <a href="{{ url_for('login') }}">Войти</a></p>
     </div>
 </div>
 </body>
