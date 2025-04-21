@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block title %}Профиль{% endblock %}
+{% block content %}
+<h1>Профиль</h1>
+
+<div class="content-box">
+    <h2>Статистика</h2>
+    <p>Событий: <strong>{{ stats.total }}</strong></p>
+    <p>Побед:   <strong>{{ stats.wins  }}</strong></p>
+
+    <h2 style="margin-top:24px">История событий</h2>
+    <table class="admin-table">
+        <thead>
+            <tr><th>Дата</th><th>Событие</th><th>Моя команда</th><th>Победитель</th></tr>
+        </thead>
+        <tbody>
+        {% for ev in history %}
+            <tr>
+                <td>{{ ev.date.strftime('%d.%m.%Y') }}</td>
+                <td>{{ ev.name }}</td>
+                <td>{{ ev.my_team }}</td>
+                <td>{{ ev.winner }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    <div class="table-pagination">
+        {% for p in range(1, pages+1) %}
+            {% if p == page %}<strong>{{ p }}</strong>
+            {% else %}
+               <a href="{{ url_for('profile', page=p) }}">{{ p }}</a>
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <h2 style="margin-top:32px">Смена пароля</h2>
+    <form method="post" action="{{ url_for('change_password') }}">
+        <label>Текущий пароль</label>
+        <input type="password" name="old" required>
+        <label>Новый пароль</label>
+        <input type="password" name="new" required>
+        <button class="btn" style="margin-top:16px">Сменить пароль</button>
+    </form>
+
+    <h2 style="margin-top:32px">Удаление аккаунта</h2>
+    <form method="post" action="{{ url_for('delete_account') }}">
+        <label>Пароль</label>
+        <input type="password" name="pwd" required>
+        <button class="btn" style="background:#e04545;margin-top:16px">Удалить аккаунт</button>
+    </form>
+</div>
+{% endblock %}

@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Команды{% endblock %}
+{% block content %}
+
+<h1>Команды</h1>
+
+<form style="margin-bottom:12px">
+    <input type="text" name="q" placeholder="Поиск по TID / названию / UID участника"
+           value="{{ q }}" style="padding:6px 8px;width:280px">
+    <button class="btn btn-primary">Поиск</button>
+</form>
+
+<div class="content-box">
+<table class="admin-table">
+    <thead>
+        {% set dir_icon = '↑' if order=='asc' else '↓' %}
+        {% macro s_link(f,t) -%}
+            <a href="{{ url_for('admin_teams', q=q, sort=f,
+                                 dir='desc' if sort==f and order=='asc' else 'asc') }}">
+                {{ t }}{% if sort==f %} {{ dir_icon }}{% endif %}
+            </a>
+        {%- endmacro %}
+        <tr>
+            <th class="col-uid">{{ s_link('team_id','TID') }}</th>
+            <th class="col-login">{{ s_link('team_name','Имя команды') }}</th>
+            <th class="col-team">UID участников</th>
+            <th class="col-role">{{ s_link('members','Кол‑во') }}</th>
+            <th class="col-action">Действие</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for t in teams %}
+        <tr>
+            <td>{{ t[0] }}</td>
+            <td>{{ t[1] }}</td>
+            <td>{{ t[2] if t[2] else '—' }}</td>
+            <td>{{ t[3] }}</td>
+            <td>
+                <div class="action-menu">
+                    <form method="post" action="{{ url_for('admin_user_action') }}">
+                       <input type="hidden" name="uid" value="{{ u[0] }}">
+                       <button name="act" value="kick_member">Исключить участника</button>
+                       <button name="act" value="disband">Расформировать команду</button>
+                       <button name="act" value="delete_team" style="color:#e66">Удалить команду</button>
+                    </form>
+                  </div>
+                  
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div class="table-pagination">
+{% for p in range(1, pages+1) %}
+    {% if p == page %}<strong>{{ p }}</strong>
+    {% else %}
+        <a href="{{ url_for('admin_teams', page=p, q=q, sort=sort, dir=order) }}">{{ p }}</a>
+    {% endif %}
+{% endfor %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,63 @@
+{% extends 'base.html' %}
+{% block title %}Пользователи{% endblock %}
+{% block content %}
+
+<h1>Пользователи</h1>
+
+<form style="margin-bottom:12px">
+    <input type="text" name="q" placeholder="Поиск по UID / логину / команде"
+           value="{{ q }}" style="padding:6px 8px;width:260px">
+    <button class="btn btn-primary">Поиск</button>
+</form>
+
+<div class="content-box">
+<table class="admin-table">
+    <thead>
+        {% set dir_icon = '↑' if order=='asc' else '↓' %}
+        {% macro sort_link(field, title) -%}
+            <a href="{{ url_for('admin_users', q=q, sort=field,
+                                dir='desc' if sort==field and order=='asc' else 'asc') }}">
+                {{ title }}{% if sort==field %} {{ dir_icon }}{% endif %}
+            </a>
+        {%- endmacro %}
+        <tr>
+            <th class="col-uid">{{ sort_link('user_id','UID') }}</th>
+            <th class="col-login">{{ sort_link('username','Логин') }}</th>
+            <th class="col-team">Команда(ы)</th>
+            <th class="col-role">{{ sort_link('role','Роль') }}</th>
+            <th class="col-action">Действие</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for u in users %}
+        <tr>
+            <td>{{ u[0] }}</td>
+            <td>{{ u[1] }}</td>
+            <td>{{ u[2] }}</td>
+            <td>{{ u[3] }}</td>
+            <td>
+                <div class="action-menu">
+                    <form method="post" action="{{ url_for('admin_user_action') }}">
+                       <input type="hidden" name="uid" value="{{ u[0] }}">
+                       <button name="act" value="moder">Назначить модератором</button>
+                       <button name="act" value="toggle">Заблокировать / Разблокировать</button>
+                       <button name="act" value="delete" style="color:#e66">Удалить</button>
+                    </form>
+                  </div>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<div class="table-pagination">
+{% for p in range(1, pages+1) %}
+    {% if p == page %}<strong>{{ p }}</strong>
+    {% else %}
+        <a href="{{ url_for('admin_users', page=p, q=q, sort=sort, dir=order) }}">{{ p }}</a>
+    {% endif %}
+{% endfor %}
+</div>
+
+{% endblock %}

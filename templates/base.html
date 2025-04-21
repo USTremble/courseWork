@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}{% endblock %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<!-- sidebar -->
+<nav class="sidebar">
+    <div class="logo">IB Competition</div>
+
+    <div class="nav-links">
+        <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint=='dashboard' %}active{% endif %}">Главная</a>
+        <a href="{{ url_for('team')      }}" class="nav-link {% if request.endpoint=='team'      %}active{% endif %}">Команда</a>
+        <a href="{{ url_for('events')    }}" class="nav-link {% if request.endpoint=='events'    %}active{% endif %}">События</a>
+        <a href="{{ url_for('profile')   }}" class="nav-link {% if request.endpoint=='profile'   %}active{% endif %}">Профиль</a>
+
+        {% if session.get('role') == 'admin' %}
+        <div class="admin-links">
+            <a href="{{ url_for('admin_users') }}" class="nav-link {% if request.endpoint=='admin_users' %}active{% endif %}">Пользователи</a>
+            <a href="{{ url_for('admin_teams') }}" class="nav-link {% if request.endpoint=='admin_teams' %}active{% endif %}">Команды</a>
+        </div>
+        {% endif %}
+    </div>
+</nav>
+
+<!-- top‑bar -->
+<header class="topbar">
+    <div class="top-title">{{ page_title }}</div>
+
+    <div class="avatar-menu">
+        <span class="user-name">{{ g.user }}</span>
+        <img src="{{ url_for('static', filename='default-avatar.png') }}"
+             alt="avatar" class="avatar" id="avatarBtn">
+        <div class="dropdown" id="dropdownMenu">
+            <a href="{{ url_for('profile') }}">Профиль</a>
+            <a href="{{ url_for('logout') }}">Выйти</a>
+        </div>
+    </div>
+</header>
+
+<!-- контент -->
+<main>{% block content %}{% endblock %}</main>
+
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
