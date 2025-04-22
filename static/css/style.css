@@ -97,9 +97,10 @@ body {
 /* ─ main ─ */
 main {
     flex: 1;
-    margin-left: 240px;
+    margin-left: 60px;
+    margin-right: 50px;
     margin-top: 60px;
-    padding: 32px 16px 40px 16px;   /* ← сузили */
+    padding: 32px 16px 40px 16px; 
     overflow: auto;
 }
 h1 { margin-bottom: 12px; font-size: 1.6rem; }
