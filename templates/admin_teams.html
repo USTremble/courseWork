@@ -36,17 +36,21 @@
             <td>{{ t[3] }}</td>
             <td>
                 <div class="action-wrapper">
-                    <a href="#" class="action-btn">Выполнить&nbsp;действие</a>
-                    <div class="action-menu">
-                        <form method="post" action="{{ url_for('admin_team_action') }}">
-                            <input type="hidden" name="tid" value="{{ t[0] }}">
-                            <button name="act" value="delete">Удалить команду</button>
-                            <button name="act" value="disband">Расформировать</button>
-                            <button name="act" value="kick">Исключить участника</button>
-                        </form>
-                    </div>
+                  <a href="#" class="action-btn">Выполнить&nbsp;действие</a>
+                  <div class="action-menu">
+                    <form method="post" action="{{ url_for('admin_team_action') }}">
+                      <input type="hidden" name="tid" value="{{ t[0] }}">
+                      <button name="act" value="delete">Удалить команду</button>
+                      <button name="act" value="disband">Расформировать</button>
+                      <div style="padding:8px">
+                        <input name="kick_uid" placeholder="UID" style="width:70px">
+                        <button name="act" value="kick" style="margin-top:4px">Исключить</button>
+                      </div>
+                    </form>
+                  </div>
                 </div>
-            </td>
+              </td>
+              
         </tr>
     {% endfor %}
     </tbody>

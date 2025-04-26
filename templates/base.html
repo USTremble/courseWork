@@ -15,14 +15,22 @@
         <a href="{{ url_for('team')      }}" class="nav-link {% if request.endpoint=='team'      %}active{% endif %}">Команда</a>
         <a href="{{ url_for('events')    }}" class="nav-link {% if request.endpoint=='events'    %}active{% endif %}">События</a>
         <a href="{{ url_for('profile')   }}" class="nav-link {% if request.endpoint=='profile'   %}active{% endif %}">Профиль</a>
-
+    
         {% if session.get('role') == 'admin' %}
-        <div class="admin-links">
-            <a href="{{ url_for('admin_users') }}" class="nav-link {% if request.endpoint=='admin_users' %}active{% endif %}">Пользователи</a>
-            <a href="{{ url_for('admin_teams') }}" class="nav-link {% if request.endpoint=='admin_teams' %}active{% endif %}">Команды</a>
-        </div>
+          <div class="admin-links">
+              <a href="{{ url_for('admin_users') }}" class="nav-link {% if request.endpoint=='admin_users' %}active{% endif %}">Пользователи</a>
+              <a href="{{ url_for('admin_teams') }}" class="nav-link {% if request.endpoint=='admin_teams' %}active{% endif %}">Команды</a>
+          </div>
+        {% endif %}
+    
+        {% if session.get('role') in ('moderator','admin') %}
+          <div class="admin-links">
+              <a href="{{ url_for('mod_create') }}"  class="nav-link {% if request.endpoint=='mod_create'  %}active{% endif %}">Создать событие</a>
+              <a href="{{ url_for('mod_manage') }}" class="nav-link {% if request.endpoint=='mod_manage' %}active{% endif %}">Проведение события</a>
+          </div>
         {% endif %}
     </div>
+          
 </nav>
 
 <header class="topbar">
@@ -53,6 +61,13 @@ document.addEventListener('DOMContentLoaded',()=>{
       });
       document.addEventListener('click',()=>avatarMenu.classList.remove('show'));
   }
+  document.querySelectorAll('[data-modal]').forEach(btn=>{
+   const m=document.getElementById(btn.dataset.modal);
+   if(m){
+       btn.addEventListener('click',()=>m.classList.add('open'));
+       m.querySelector('.close').addEventListener('click',()=>m.classList.remove('open'));
+   }
+});
 
   document.querySelectorAll('.action-btn').forEach(btn=>{
       const menu=btn.nextElementSibling;

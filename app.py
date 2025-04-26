@@ -11,7 +11,7 @@ app.secret_key = '777'
 
 def get_db_connection():
     return psycopg2.connect(
-        dbname='ib_competition_db',
+        dbname='competition',
         user='uster',
         password='1234',
         host='localhost',
@@ -41,13 +41,16 @@ def load_user():
     g.user = session.get('username')
 
 # ───────── регистрация / вход ──────────────────────────────
+MAX_LOGIN = 32
 @app.route('/register', methods=['GET', 'POST'])
 def register():
     error = None
     if request.method == 'POST':
-        u, p, c = request.form['username'], request.form['password'], request.form['confirm_password']
+        u, p, c = request.form['username'].strip(), request.form['password'], request.form['confirm_password']
         if p != c:
             error = 'Пароли не совпадают'
+        elif len(u) > MAX_LOGIN:
+            error = f'Максимальна длина логина {MAX_LOGIN}'
         else:
             conn = get_db_connection(); cur = conn.cursor()
             cur.execute("SELECT 1 FROM users WHERE username=%s", (u,))
@@ -88,47 +91,118 @@ def logout():
 def dashboard():
     return render_template('dashboard.html', page_title='Главная')
 
-@app.route('/events')
-@login_required
-def events():
-    return render_template('events.html', page_title='События')
-
 # ───────── профиль ─────────────────────────────────────────
 EVENTS_PER_PAGE=10
-def user_stats(uid):
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT COUNT(*), SUM(is_winner::int) FROM event_participants WHERE user_id=%s",(uid,))
-    total,wins=cur.fetchone(); cur.close(); conn.close()
-    return {'total':total or 0,'wins':wins or 0}
+# ─────────────────────────── user_stats ───────────────────────────
+def user_stats(uid: int) -> dict:
+    """
+    Возвращает {'total': N, 'wins': M}
+    total – количество событий, где участвовали команды игрока
+    wins  – сколько раз его команда была первой по очкам
+    """
+    conn = get_db_connection(); cur = conn.cursor()
+
+    # все команды пользователя
+    cur.execute("SELECT team_id FROM team_members WHERE user_id=%s", (uid,))
+    team_ids = [r[0] for r in cur.fetchall()]
+    if not team_ids:
+        cur.close(); conn.close()
+        return {'total': 0, 'wins': 0}
+
+    # всего событий
+    cur.execute("""SELECT COUNT(DISTINCT event_id)
+                     FROM event_teams
+                    WHERE team_id = ANY(%s)""", (team_ids,))
+    total = cur.fetchone()[0]
+
+    # число побед (событие в статусе finished + макс. очки)
+    cur.execute("""
+        SELECT COUNT(*)
+          FROM events e
+          JOIN LATERAL (
+               SELECT et.team_id
+                 FROM event_teams et
+                WHERE et.event_id = e.event_id
+                ORDER BY et.points DESC
+                LIMIT 1
+          ) win ON TRUE
+         WHERE e.status = 'finished'
+           AND win.team_id = ANY(%s)
+    """, (team_ids,))
+    wins = cur.fetchone()[0]
+
+    cur.close(); conn.close()
+    return {'total': total, 'wins': wins}
+
+# ─────────────────────────── PROFILE ──────────────────────────────
+EVENTS_PER_PAGE = 10           # оставьте, если уже объявлено выше
 
 @app.route('/profile')
 @login_required
 def profile():
-    uid=session['user_id']; page=max(int(request.args.get('page',1)),1); off=(page-1)*EVENTS_PER_PAGE
-    stats=user_stats(uid)
+    uid   = session['user_id']
+    page  = max(int(request.args.get('page', 1)), 1)
+    off   = (page - 1) * EVENTS_PER_PAGE
 
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT is_blocked FROM users WHERE user_id=%s",(uid,)); is_blocked=cur.fetchone()[0]
+    stats = user_stats(uid)
 
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT is_blocked FROM users WHERE user_id=%s", (uid,))
+    is_blocked = cur.fetchone()[0]
+
+    # все команды пользователя
+    cur.execute("SELECT team_id FROM team_members WHERE user_id=%s", (uid,))
+    team_ids = [r[0] for r in cur.fetchall()]
+
+    # история участия
     cur.execute("""
-        SELECT e.date,e.name,mt.team_name,wt.team_name
-        FROM events e
-        JOIN event_participants ep ON ep.event_id=e.event_id
-        JOIN teams mt ON mt.team_id=ep.team_id
-        JOIN teams wt ON wt.team_id=e.winner_team_id
-        WHERE ep.user_id=%s
-        ORDER BY e.date DESC LIMIT %s OFFSET %s
-    """,(uid,EVENTS_PER_PAGE,off))
-    history=[{'date':r[0],'name':r[1],'my_team':r[2],'winner':r[3]} for r in cur.fetchall()]
-    cur.execute("SELECT COUNT(*) FROM event_participants WHERE user_id=%s",(uid,))
-    total=cur.fetchone()[0]; pages=(total+EVENTS_PER_PAGE-1)//EVENTS_PER_PAGE
+        SELECT e.event_id,
+               e.name,
+               e.status,
+               NOW()            AS ev_date,          -- используем текущее время
+               my_t.team_name   AS my_team,
+               win_t.team_name  AS winner
+          FROM events e
+          JOIN event_teams my_et   ON my_et.event_id = e.event_id
+          JOIN teams      my_t     ON my_t.team_id   = my_et.team_id
+          LEFT JOIN LATERAL (
+                SELECT t.team_name
+                  FROM event_teams et JOIN teams t USING(team_id)
+                 WHERE et.event_id = e.event_id
+                 ORDER BY et.points DESC
+                 LIMIT 1
+          ) win_t ON TRUE
+         WHERE my_et.team_id = ANY(%s)
+         ORDER BY e.event_id DESC
+         LIMIT %s OFFSET %s
+    """, (team_ids, EVENTS_PER_PAGE, off))
+    history = [{
+        'date'   : r[3],
+        'name'   : r[1],
+        'status' : r[2],
+        'my_team': r[4],
+        'winner' : r[5]
+    } for r in cur.fetchall()]
+
+    # всего записей для пагинации
+    cur.execute("""SELECT COUNT(*)
+                     FROM event_teams
+                    WHERE team_id = ANY(%s)""", (team_ids,))
+    total = cur.fetchone()[0]
+    pages = (total + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE
+
     cur.close(); conn.close()
 
-    return render_template('profile.html', page_title='Профиль',
-                           stats=stats,is_blocked=is_blocked,
-                           history=history,page=page,pages=pages,
+    return render_template('profile.html',
+                           page_title='Профиль',
+                           stats=stats,
+                           is_blocked=is_blocked,
+                           history=history,
+                           page=page, pages=pages,
                            pass_msg=request.args.get('pm'),
-                           pass_ok=request.args.get('ok')=='1')
+                           pass_ok=request.args.get('ok') == '1')
+
+
 
 @app.route('/change_password', methods=['POST'])
 @login_required
@@ -180,34 +254,46 @@ def team():
 @app.route('/create_team', methods=['POST'])
 @login_required
 def create_team():
-    name,desc,code=request.form['team_name'],request.form['description'],request.form['invite_code']
-    conn=get_db_connection(); cur=conn.cursor()
+    name = request.form['team_name'].strip()[:32]
+    code = (request.form['invite_code'] or '').strip()[:16] or random_code()
+
+    if len(name) < 3:
+        flash('Название слишком короткое', 'modal-create-error')
+        return redirect(url_for('team'))
+
+    conn = get_db_connection(); cur = conn.cursor()
     try:
-        cur.execute("INSERT INTO teams (team_name,description,invite_code) VALUES (%s,%s,%s) RETURNING team_id",
-                    (name,desc,code))
-        tid=cur.fetchone()[0]
-        cur.execute("INSERT INTO team_members (team_id,user_id) VALUES (%s,%s)",(tid,session['user_id']))
-        conn.commit(); flash('Команда создана')
+        cur.execute("""INSERT INTO teams(team_name,invite_code)
+                       VALUES(%s,%s) RETURNING team_id""", (name, code))
+        tid = cur.fetchone()[0]
+        cur.execute("INSERT INTO team_members(team_id,user_id) VALUES(%s,%s)",
+                    (tid, session['user_id']))
+        conn.commit()
     except psycopg2.errors.UniqueViolation:
-        conn.rollback(); flash('Имя или код уже заняты','error')
+        conn.rollback()
+        flash('Имя или код уже заняты', 'modal-create-error')
     finally:
         cur.close(); conn.close()
     return redirect(url_for('team'))
 
+
 @app.route('/join_team', methods=['POST'])
 @login_required
 def join_team():
-    code=request.form['invite_code']
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT team_id FROM teams WHERE invite_code=%s",(code,))
-    row=cur.fetchone()
+    code = request.form['invite_code'].strip()[:16]
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT team_id FROM teams WHERE invite_code=%s", (code,))
+    row = cur.fetchone()
     if row:
-        cur.execute("INSERT INTO team_members (team_id,user_id) VALUES (%s,%s) ON CONFLICT DO NOTHING",(row[0],session['user_id']))
-        conn.commit(); flash('Вы присоединились к команде')
+        cur.execute("""INSERT INTO team_members(team_id,user_id)
+                       VALUES(%s,%s) ON CONFLICT DO NOTHING""",
+                    (row[0], session['user_id']))
+        conn.commit()
     else:
-        flash('Неверный код','error')
+        flash('Неверный код', 'modal-join-error')
     cur.close(); conn.close()
     return redirect(url_for('team'))
+
 
 @app.route('/leave_team', methods=['POST'])
 @login_required
@@ -312,13 +398,211 @@ def admin_team_action():
     elif act=='disband':
         cur.execute("DELETE FROM team_members WHERE team_id=%s",(tid,))
     elif act=='kick':
-        uid=request.form.get('uid')
-        if uid: cur.execute("DELETE FROM team_members WHERE team_id=%s AND user_id=%s",(tid,uid))
+        uid=request.form.get('kick_uid')
+        if uid:
+            cur.execute("DELETE FROM team_members WHERE team_id=%s AND user_id=%s",(tid,uid))
     conn.commit(); cur.close(); conn.close()
     return redirect(request.referrer or url_for('admin_teams'))
 
+# ───── защита от удалённого аккаунта ─────
+@app.before_request
+def ensure_exists():
+    uid = session.get('user_id')
+    if uid:
+        conn=get_db_connection(); cur=conn.cursor()
+        cur.execute("SELECT 1 FROM users WHERE user_id=%s", (uid,))
+        if not cur.fetchone():
+            session.clear()
+        cur.close(); conn.close()
+    g.user = session.get('username')
+
+# ─────────────────  СОБЫТИЯ  (игрок) ────────────────
+def team_required():
+    team, members = current_team()
+    if not team:
+        flash('Нужно состоять в команде', 'error')
+        return None, None
+    return team, members
+
+# ─────────────────────────── EVENTS (игрок) ──────────────────────
+@app.route('/events', methods=['GET', 'POST'])
+@login_required
+def events():
+    team, _ = current_team()
+    if not team:
+        return render_template('events.html',
+                           team=None,
+                           page_title='События')
+
+    # POST: присоединение
+    if request.method == 'POST':
+        code = request.form['code'][:16]
+        conn = get_db_connection(); cur = conn.cursor()
+        cur.execute("SELECT event_id FROM events WHERE code=%s", (code,))
+        ev = cur.fetchone()
+        if not ev:
+            flash('Код не найден', 'error')
+        else:
+            try:
+                cur.execute("""INSERT INTO event_teams(event_id,team_id)
+                               VALUES(%s,%s)""", (ev[0], team['team_id']))
+                conn.commit(); flash('Команда зарегистрирована')
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback(); flash('Команда уже участвует', 'error')
+        cur.close(); conn.close()
+        return redirect(url_for('events'))
+
+    # GET: мои события
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        SELECT e.event_id,
+               e.name,
+               e.status,
+               e.type,
+               e.description,
+               et.points,
+               e.file_path,
+               (SELECT t.team_name||' ('||et2.points||')'
+                  FROM event_teams et2 JOIN teams t USING(team_id)
+                 WHERE et2.event_id=e.event_id
+                 ORDER BY et2.points DESC LIMIT 1) AS winner
+          FROM events e
+          JOIN event_teams et USING(event_id)
+         WHERE et.team_id=%s
+    """, (team['team_id'],))
+    my_events = cur.fetchall()
+    cur.close(); conn.close()
+
+    # нужен флаг «все события = finished»
+    all_finished = all(ev[2] == 'finished' for ev in my_events)
+
+    return render_template('events.html',
+                           page_title='События',
+                           team=team,
+                           events=my_events,
+                           all_finished=all_finished)
+
+@app.route('/submit_answer/<int:eid>', methods=['POST'])
+@login_required
+def submit_answer(eid):
+    team, _ = current_team()
+    if not team:
+        flash('Нужно состоять в команде', 'error')
+        return redirect(url_for('events'))
+
+    ans = request.form['answer'].strip()
+    conn = get_db_connection(); cur = conn.cursor()
+
+    cur.execute("SELECT answer, status FROM events WHERE event_id=%s", (eid,))
+    row = cur.fetchone()
+    if not row:
+        flash('Событие не найдено', 'error')
+    elif row[1] != 'running':
+        flash('Приём ответов закрыт', 'error')
+    else:
+        cur.execute("""INSERT INTO event_submits(event_id, team_id, answer)
+                       VALUES (%s,%s,%s)""",
+                    (eid, team['team_id'], ans))
+        if ans.lower() == row[0].lower():
+            cur.execute("""UPDATE event_teams
+                              SET points = points + 1
+                            WHERE event_id=%s AND team_id=%s""",
+                        (eid, team['team_id']))
+        conn.commit(); flash('Ответ отправлен')
+    cur.close(); conn.close()
+    return redirect(url_for('events'))
+
+
+# ─────────────────  СОБЫТИЯ  (модератор) ─────────────
+def moderator_required(view):
+    @wraps(view)
+    def wrapped(*a,**kw):
+        if session.get('role') not in ('moderator','admin'):
+            flash('Нужны права модератора','error'); return redirect(url_for('dashboard'))
+        return view(*a,**kw)
+    return wrapped
+
+@app.route('/mod/create', methods=['GET','POST'])
+@moderator_required
+def mod_create():
+    msg=None
+    if request.method=='POST':
+        code=request.form['code'][:16]
+        name=request.form['name'][:64]
+        ev_type=request.form['ev_type']
+        answer=request.form['answer'].strip()
+        desc=request.form['desc']
+        pdf=request.files.get('task')
+        if pdf and pdf.filename.endswith('.pdf'):
+            fp='static/tasks/'+pdf.filename
+            pdf.save(fp)
+            conn=get_db_connection(); cur=conn.cursor()
+            try:
+                cur.execute("""INSERT INTO events(code,name,description,type,answer,file_path,created_by)
+                               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                            (code,name,desc,ev_type,answer,fp,session['user_id']))
+                conn.commit(); msg='Создано'
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback(); msg='Код уже занят'
+            cur.close(); conn.close()
+        else: msg='Нужен PDF'
+    return render_template('mod_create.html', msg=msg)
+
+@app.route('/mod/manage', methods=['GET', 'POST'])
+@moderator_required
+def mod_manage():
+    ev = None; teams = []
+    code_posted = request.form.get('code', '')
+
+    conn = get_db_connection(); cur = conn.cursor()
+    if request.method == 'POST':
+        code = code_posted[:16]
+        cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
+        ev = cur.fetchone()
+
+        if ev:
+            eid = ev[0]
+            if 'start' in request.form:
+                cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
+            elif 'finish' in request.form:
+                cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
+            elif 'pts' in request.form:
+                tid = request.form['tid']; delta = int(request.form['delta'])
+                cur.execute("UPDATE event_teams SET points = points + %s WHERE event_id=%s AND team_id=%s",
+                            (delta, eid, tid))
+            elif 'dq' in request.form:
+                tid = request.form['tid']
+                cur.execute("DELETE FROM event_teams WHERE event_id=%s AND team_id=%s", (eid, tid))
+            conn.commit()
+
+            cur.execute("""
+                SELECT et.team_id,
+                       t.team_name,
+                       et.points,
+                       COALESCE((SELECT answer FROM event_submits s
+                                  WHERE s.team_id = et.team_id
+                                    AND s.event_id = et.event_id
+                                  ORDER BY ts DESC LIMIT 1),'') AS last_answer,
+                       COALESCE((SELECT ts FROM event_submits s
+                                  WHERE s.team_id = et.team_id
+                                    AND s.event_id = et.event_id
+                                  ORDER BY ts DESC LIMIT 1),NULL) AS last_ts
+                  FROM event_teams et
+                  JOIN teams t USING(team_id)
+                 WHERE et.event_id = %s
+                 ORDER BY et.id      -- без сортировки по очкам
+            """, (eid,))
+            teams = cur.fetchall()
+    cur.close(); conn.close()
+
+    return render_template('mod_manage.html',
+                           page_title='Проведение события',
+                           ev=ev, teams=teams, code_entered=code_posted)
+
+
 # ───────── index ────────────────────────────────────────
 @app.route('/')
-def index(): return redirect(url_for('dashboard')) if g.user else render_template('index.html')
+def index():
+    return redirect(url_for('dashboard')) if g.user else render_template('index.html')
 
 if __name__=='__main__': app.run(debug=True)

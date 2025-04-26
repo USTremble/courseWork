@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+{% block title %}Проведение события{% endblock %}
+{% block content %}
+<h1>Проведение события</h1>
+
+<!-- форма выбора события -->
+<form method="post" class="content-box" style="max-width:320px">
+  <label>Код события</label>
+  <input name="code" value="{{ code_entered }}">
+  <button class="btn" style="margin-top:8px">Открыть</button>
+</form>
+
+{% if ev %}
+<div class="content-box" id="eventPanel" style="margin-top:20px; position:relative">
+  <span class="close" style="position:absolute;right:12px;top:10px;cursor:pointer;font-size:1.3rem"
+        onclick="document.getElementById('eventPanel').remove()">✖</span>
+
+  <h2>{{ ev[1] }} — {{ ev[2] }}</h2>
+
+  {# ───── кнопки показываем только пока не finished ───── #}
+  {% if ev[2] != 'finished' %}
+    <form method="post" style="display:flex;gap:12px;margin-bottom:12px">
+        <input type="hidden" name="code" value="{{ code_entered }}">
+        <button name="start"  class="btn">Начать событие</button>
+        <button name="finish" class="btn btn-outline">Завершить</button>
+    </form>
+  {% endif %}
+
+  <table class="admin-table">
+    <thead><tr>
+      <th>Команда</th><th>Очки</th><th>Последний ответ</th><th>Время</th><th>Действие</th>
+    </tr></thead>
+    <tbody>
+    {% for t in teams %}
+      <tr>
+        <td>{{ t[1] }}</td>
+        <td>{{ t[2] }}</td>
+        <td>{{ t[3] }}</td>
+        <td>{{ t[4] or '' }}</td>
+        <td>
+          <div class="action-wrapper">
+            <a href="#" class="action-btn">Выполнить действие</a>
+            <div class="action-menu">
+              <form method="post">
+                <input type="hidden" name="code" value="{{ code_entered }}">
+                <input type="hidden" name="tid"  value="{{ t[0] }}">
+                <input type="number" name="delta" value="1" min="-255" max="255" style="width:60px">
+                <button name="pts">Применить Δ</button>
+                <button name="dq" style="color:#e05555">Дисквалифицировать</button>
+              </form>
+            </div>
+          </div>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<!-- авто-обновление -->
+{% endif %}
+{% endblock %}

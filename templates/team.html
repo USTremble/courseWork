@@ -4,10 +4,15 @@
 <h1>Команда</h1>
 
 {% if not team %}
-    <div class="content-box" style="display:flex;gap:20px">
-        <button class="btn btn-primary" data-modal="createModal">Создать команду</button>
-        <button class="btn btn-outline" data-modal="joinModal">Присоединиться к команде</button>
-    </div>
+    {% if get_flashed_messages(with_categories=True) %}
+    {% for cat,msg in get_flashed_messages(with_categories=True) %}
+        <p style="color:{% if cat=='error' %}#ff7070{% else %}var(--accent){% endif %};">{{ msg }}</p>
+    {% endfor %}
+    {% endif %}
+  <div class="content-box" style="display:flex;gap:20px">
+      <button class="btn" data-modal="createModal">Создать команду</button>
+      <button class="btn btn-outline" data-modal="joinModal">Присоединиться</button>
+  </div>
 {% else %}
     <div class="content-box">
         <h2>{{ team.team_name }}</h2>
@@ -26,31 +31,41 @@
 
 <!-- ─ modal create ─ -->
 <div class="modal" id="createModal">
-  <div class="modal-content">
-    <span class="close">✖</span>
-    <h2>Регистрация команды</h2>
-    <form method="post" action="{{ url_for('create_team') }}">
-        <label>Название команды</label>
-        <input type="text" name="team_name" required>
-        <label>Описание</label>
-        <textarea name="description" rows="3"></textarea>
-        <label>Код‑приглашение</label>
-        <input type="text" name="invite_code" required>
-        <button>Создать</button>
-    </form>
+    <div class="modal-content">
+      <span class="close">✖</span>
+      <h3>Новая команда</h3>
+  
+      {% for c,m in get_flashed_messages(with_categories=True) %}
+        {% if c == 'modal-create-error' %}
+          <p style="color:#ff7070">{{ m }}</p>
+        {% endif %}
+      {% endfor %}
+  
+      <form method="post" action="{{ url_for('create_team') }}">
+        <label>Название</label><input name="team_name" required>
+        <label>Код-приглашение (необязательно)</label><input name="invite_code">
+        <button class="btn" style="margin-top:12px">Создать</button>
+      </form>
+    </div>
   </div>
-</div>
+  
 
 <!-- ─ modal join ─ -->
 <div class="modal" id="joinModal">
-  <div class="modal-content">
-    <span class="close">✖</span>
-    <h2>Присоединиться по коду</h2>
-    <form method="post" action="{{ url_for('join_team') }}">
-        <label>Код‑приглашение</label>
-        <input type="text" name="invite_code" required>
-        <button>Присоединиться</button>
-    </form>
-  </div>
+    <div class="modal-content">
+      <span class="close">✖</span>
+      <h3>Код приглашения</h3>
+  
+      {% for c,m in get_flashed_messages(with_categories=True) %}
+        {% if c == 'modal-join-error' %}
+          <p style="color:#ff7070">{{ m }}</p>
+        {% endif %}
+      {% endfor %}
+  
+      <form method="post" action="{{ url_for('join_team') }}">
+        <input name="invite_code" required>
+        <button class="btn" style="margin-top:12px">Присоединиться</button>
+      </form>
+    </div>
 </div>
 {% endblock %}
