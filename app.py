@@ -140,8 +140,7 @@ def logout():
 def dashboard():
     return render_template('dashboard.html', page_title='Главная')
 
-# ───────── профиль ─────────────────────────────────────────
-EVENTS_PER_PAGE=10
+
 # ─────────────────────────── user_stats ───────────────────────────
 def user_stats(uid: int) -> dict:
     """
@@ -183,20 +182,31 @@ def user_stats(uid: int) -> dict:
     cur.close(); conn.close()
     return {'total': total, 'wins': wins}
 
-# ─────────────────────────── PROFILE ──────────────────────────────
+# ───────── профиль ─────────
 @app.route('/profile')
 @login_required
 def profile():
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT is_blocked FROM users WHERE user_id=%s", (session['user_id'],))
-    is_blocked = cur.fetchone()[0]
-    cur.close(); conn.close()
+    """
+    Показывает сведения об учётной записи:
+    • имя, роль, статус (активен / заблокирован)
+    • ссылку на текущую команду (если есть)
+    • формы смены пароля и удаления аккаунта
+    """
+    username = session.get('username')
+    role     = session.get('role')         # player / moderator / admin
+    blocked  = session.get('is_blocked', False)
+
+    team, _ = current_team()               # None, [] если не в команде
 
     return render_template('profile.html',
                            page_title='Профиль',
-                           is_blocked=is_blocked,
+                           username=username,
+                           role=role,
+                           is_blocked=blocked,
+                           team=team,
                            pass_msg=request.args.get('pm'),
-                           pass_ok=request.args.get('ok')=='1')
+                           pass_ok=request.args.get('ok') == '1')
+
 
 
 
@@ -536,27 +546,6 @@ def admin_team_action():
     conn.commit(); cur.close(); conn.close()
     return redirect(request.referrer or url_for('admin_teams'))
 
-# ───── защита от удалённого аккаунта ─────
-@app.before_request
-def ensure_exists():
-    uid = session.get('user_id')
-    if uid:
-        conn=get_db_connection(); cur=conn.cursor()
-        cur.execute("SELECT 1 FROM users WHERE user_id=%s", (uid,))
-        if not cur.fetchone():
-            session.clear()
-        cur.close(); conn.close()
-    g.user = session.get('username')
-
-# ─────────────────  СОБЫТИЯ  (игрок) ────────────────
-def team_required():
-    team, members = current_team()
-    if not team:
-        flash('Нужно состоять в команде', 'error')
-        return None, None
-    return team, members
-
-# ─────────────────────────── EVENTS (игрок) ──────────────────────
 # ───────────────────────── EVENTS (игрок) ─────────────────────────
 @app.route('/events', methods=['GET', 'POST'])
 @login_required

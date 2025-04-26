@@ -1,32 +1,66 @@
 {% extends 'base.html' %}
 {% block title %}Профиль{% endblock %}
+
 {% block content %}
 <h1>Профиль</h1>
 
-{% if is_blocked %}
-  <p style="color:#e05555">Аккаунт заблокирован</p>
-{% endif %}
+{# ─── роль ─── #}
+{% set role_color = {'player':'#3cb371','moderator':'#8a2be2','admin':'#e05555'} %}
+<p style="color:{{ role_color[role] }};margin-bottom:4px">
+  {% if role == 'player' %}Участник соревнований{% elif role == 'moderator' %}
+     Модератор{% else %}Администратор{% endif %}
+</p>
 
-<!-- смена пароля -->
+{# ─── имя ─── #}
+<h2 style="margin-top:0">{{ username }}</h2>
+
+{# ─── статус ─── #}
+<p>
+  Статус аккаунта:
+  {% if is_blocked %}
+     <span style="color:#e05555">Заблокирован</span>
+  {% else %}
+     <span style="color:#3cb371">Активен</span>
+  {% endif %}
+</p>
+
+{# ─── текущая команда ─── #}
+<p>
+  Текущая команда:
+  {% if team %}
+     <a href="{{ url_for('team') }}" class="link">{{ team.team_name }}</a>
+  {% else %}
+     — нет —
+  {% endif %}
+</p>
+
+<hr style="margin:24px 0">
+
+{# ─── смена пароля ─── #}
 <div class="content-box" style="max-width:360px">
   <h3>Сменить пароль</h3>
+
   {% if pass_msg %}
     <p style="color:{{ 'green' if pass_ok else '#e05555' }}">{{ pass_msg }}</p>
   {% endif %}
+
   <form method="post" action="{{ url_for('change_password') }}">
-     <label>Старый пароль</label><input type="password" name="old" required>
-     <label>Новый пароль</label><input type="password" name="new" required>
-     <button class="btn">Сохранить</button>
+    <label>Старый пароль</label>
+    <input type="password" name="old" required>
+    <label>Новый пароль</label>
+    <input type="password" name="new" required>
+    <button class="btn">Сохранить</button>
   </form>
 </div>
 
-<!-- удалить аккаунт -->
-<div class="content-box" style="max-width:360px;margin-top:20px">
+{# ─── удаление аккаунта ─── #}
+<div class="content-box" style="max-width:360px;margin-top:24px">
   <h3 style="color:#e05555">Удалить аккаунт</h3>
   <form method="post" action="{{ url_for('delete_account') }}"
         onsubmit="return confirm('Удалить аккаунт безвозвратно?')">
-     <label>Пароль</label><input type="password" name="pwd" required>
-     <button class="btn btn-danger">Удалить</button>
+    <label>Пароль</label>
+    <input type="password" name="pwd" required>
+    <button class="btn btn-danger">Удалить</button>
   </form>
 </div>
 {% endblock %}
