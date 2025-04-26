@@ -1,92 +1,87 @@
 {% extends 'base.html' %}
 {% block title %}События{% endblock %}
+
 {% block content %}
 <h1>События</h1>
 
 {% if not team %}
-    <p>Вы не состоите в команде.</p>
+  <p>Нужно состоять в команде.</p>
 {% else %}
-    {% for e in events %}
-      {# Индексы:       0-id 1-name 2-status 3-type 4-desc 5-my_pts 6-file 7-leaderboard #}
-      <div class="content-box" data-event="{{ e[0] }}"
-           style="margin-bottom:16px;position:relative">
-        <span class="close"
-              style="position:absolute;right:12px;top:10px;cursor:pointer;font-size:1.2rem"
-              onclick="dismissEvent({{ e[0] }}, this)">✖</span>
 
-        <h2>{{ e[1] }} <small>({{ e[2] }})</small></h2>
-
-        {# ───── waiting ───── #}
-        {% if e[2] == 'waiting' %}
-            Ожидание других команд…
-
-        {# ───── running ───── #}
-        {% elif e[2] == 'running' %}
-            {% if e[6] %}
-               <p><a href="{{ url_for('static', filename=e[6]) }}" target="_blank">
-                  Скачать задание (PDF)</a></p>
-            {% endif %}
-            <form method="post" action="{{ url_for('submit_answer', eid=e[0]) }}">
-               <input name="answer" placeholder="Ответ" required>
-               <button class="btn">Отправить</button>
-            </form>
-
-            <h3 style="margin-top:12px">Leaderboard</h3>
-            <table class="admin-table" style="max-width:360px">
-              <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
-              <tbody>
-                 {% for row in e[7] %}
-                   <tr><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td></tr>
-                 {% endfor %}
-              </tbody>
-            </table>
-
-        {# ───── finished ───── #}
-        {% else %}
-            <p>Событие завершено.</p>
-
-            <h3 style="margin-top:12px">Leaderboard</h3>
-            <table class="admin-table" style="max-width:360px">
-              <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
-              <tbody>
-                 {% for row in e[7] %}
-                   <tr><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td></tr>
-                 {% endfor %}
-              </tbody>
-            </table>
-        {% endif %}
-
-        <p style="margin-top:8px">Ваши очки: <strong>{{ e[5] }}</strong></p>
-      </div>
+  {# ───────── форма «Присоединиться по коду» ───────── #}
+  {% if show_join %}
+  <div class="content-box" style="max-width:320px">
+    <h3>Присоединиться по коду</h3>
+    <form method="post">
+      <input name="code" placeholder="Код события" required>
+      <button class="btn" style="margin-top:8px">Присоединиться</button>
+    </form>
+    {% for c,m in get_flashed_messages(with_categories=True) if c=='error' %}
+      <p style="color:#e05555">{{ m }}</p>
     {% endfor %}
+  </div>
+  {% endif %}
 
-    {# форма ввода кода — только если нет активных waiting/running #}
-    {% if not events or all_finished %}
-      <form method="post" class="content-box" style="max-width:380px">
-        {% for c,m in get_flashed_messages(with_categories=True) %}
-          {% if c == 'modal-join-error' %}
-            <p style="color:#ff7070">{{ m }}</p>
-          {% endif %}
-        {% endfor %}
-        <label>Код события</label>
-        <input name="code" required style="width:100%;padding:8px;margin:8px 0">
-        <button class="btn">Присоединиться</button>
-      </form>
-    {% endif %}
+  {# ───────── waiting-карточки ───────── #}
+  {% if show_join and waiting %}
+    <h2 style="margin-top:28px">Доступные события</h2>
+    <div class="card-grid">
+      {% for e in waiting %}
+        <div class="card">
+          <h4>{{ e[1] }}</h4>
+          <p>Тип: {{ e[2]|upper }}</p>
+          <p>{{ e[3] }}</p>
+          <p>Команд в очереди: {{ e[4] }}</p>
+          <form method="post">
+            <input type="hidden" name="join_eid" value="{{ e[0] }}">
+            <button class="btn">Участвовать</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  {# ───────── текущее событие ───────── #}
+  {% if current %}
+    <div class="content-box" style="margin-top:32px">
+      <h2>{{ current[1] }} — {{ current[2] }}</h2>
+
+      {% if current[2]=='waiting' %}
+        <p>Ожидание других команд…</p>
+
+      {% elif current[2]=='running' %}
+        <p><a href="{{ url_for('static', filename=current[6]) }}" target="_blank">
+           📄 Скачать задание</a></p>
+
+        <form method="post" action="{{ url_for('submit_answer', eid=current[0]) }}">
+          <label>Ответ</label>
+          <input name="answer" required>
+          <button class="btn">Отправить</button>
+        </form>
+
+      {% if lb %}
+        <h3 style="margin-top:24px">Leaderboard</h3>
+        {% include '_lb.html' %}
+      {% endif %}
+
+      {% elif current[2]=='finished' %}
+        <h3>Итоги</h3>
+        {% if lb %}{% include '_lb.html' %}{% endif %}
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if not current and not waiting %}
+    <p style="margin-top:24px">Нет активных событий.</p>
+  {% endif %}
 {% endif %}
 
-<!-- JS: localStorage + авто-reload (15 c) -->
-<script>
-function dismissed(){return JSON.parse(localStorage.getItem('dismissedEvents')||'[]')}
-function save(lst){localStorage.setItem('dismissedEvents',JSON.stringify(lst))}
-
-document.querySelectorAll('[data-event]').forEach(div=>{
-  if(dismissed().includes(+div.dataset.event)) div.remove();
-});
-function dismissEvent(id,el){
-  el.closest('[data-event]').remove();
-  const lst=dismissed(); if(!lst.includes(id)){lst.push(id);save(lst);}
-}
-
-</script>
+<style>
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:12px}
+.card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.card h4{margin:0 0 6px 0}
+.admin-table{border-collapse:collapse;width:100%;margin-top:8px}
+.admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
+.admin-table thead{background:#f0f6fa;font-weight:600}
+</style>
 {% endblock %}

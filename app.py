@@ -546,7 +546,7 @@ def admin_team_action():
     conn.commit(); cur.close(); conn.close()
     return redirect(request.referrer or url_for('admin_teams'))
 
-# ───────────────────────── EVENTS (игрок) ─────────────────────────
+# ───────────────── EVENTS (игрок) ─────────────────
 @app.route('/events', methods=['GET', 'POST'])
 @login_required
 def events():
@@ -556,71 +556,97 @@ def events():
                                team=None,
                                page_title='События')
 
-    # -------- POST: присоединение по коду --------
+    conn = get_db_connection(); cur = conn.cursor()
+
+    # ---------- POST ----------
     if request.method == 'POST':
-        code = request.form['code'][:16]
+        if 'code' in request.form:                     # присоединение по коду
+            code = request.form['code'][:16]
+            cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code,))
+            ev = cur.fetchone()
+            if not ev:
+                flash('Код не найден', 'error')
+            elif ev[1] != 'waiting':
+                flash('Регистрация закрыта', 'error')
+            else:
+                try:
+                    cur.execute("INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
+                                (ev[0], team['team_id']))
+                    conn.commit()
+                except psycopg2.errors.UniqueViolation:
+                    conn.rollback(); flash('Команда уже участвует', 'error')
 
-        conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT event_id, status FROM events WHERE code=%s", (code,))
-        ev = cur.fetchone()
-
-        if not ev:
-            flash('Код не найден', 'modal-join-error')
-        elif ev[1] != 'waiting':
-            flash('Регистрация закрыта', 'modal-join-error')
-        else:
+        elif 'join_eid' in request.form:               # кнопка «Участвовать»
+            eid = request.form['join_eid']
             try:
-                cur.execute("""INSERT INTO event_teams(event_id, team_id)
-                               VALUES (%s,%s)""", (ev[0], team['team_id']))
+                cur.execute("INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
+                            (eid, team['team_id']))
                 conn.commit()
             except psycopg2.errors.UniqueViolation:
-                conn.rollback()
-                flash('Команда уже участвует', 'modal-join-error')
-        cur.close(); conn.close()
-        return redirect(url_for('events'))       # PRG-паттерн
+                conn.rollback(); flash('Команда уже участвует', 'error')
 
-    # -------- GET: мои события + лидерборды --------
-    conn = get_db_connection(); cur = conn.cursor()
+        cur.close(); conn.close()
+        return redirect(url_for('events'))              # PRG-паттерн
+
+    # ---------- GET ----------
+    # текущее (последнее) событие команды
     cur.execute("""
-        SELECT e.event_id,
-               e.name,
-               e.status,
-               e.type,
-               e.description,
-               et.points,
-               e.file_path
+        SELECT e.event_id,e.name,e.status,e.type,e.description,
+               et.points,e.file_path
           FROM events e
           JOIN event_teams et USING(event_id)
          WHERE et.team_id = %s
-    """, (team['team_id'],))
-    rows = cur.fetchall()
+           AND e.event_id = (SELECT MAX(event_id)
+                               FROM event_teams
+                              WHERE team_id = %s)
+    """, (team['team_id'], team['team_id']))
+    current = cur.fetchone()
 
-    events = []
-    for r in rows:
-        ev = list(r)
-        if r[2] in ('running', 'finished'):               # нужна таблица очков
-            cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
-                                  t.team_name,
-                                  et.points
-                             FROM event_teams et
-                             JOIN teams t USING(team_id)
-                            WHERE et.event_id=%s
-                            ORDER BY et.points DESC""",
-                        (r[0],))
-            ev.append(cur.fetchall())     # index 7 = leaderboard list
-        else:
-            ev.append([])                 # пустой лидерборд
-        events.append(ev)
+    # показываем форму/карточки, если события нет ИЛИ оно уже finished
+    show_join = (current is None) or (current[2] == 'finished')
+
+    waiting_events = []
+    if show_join:
+        cur.execute("""
+            SELECT e.event_id,
+                   e.name,
+                   e.type,
+                   e.description,
+                   COUNT(et.team_id) AS q
+              FROM events e
+              LEFT JOIN event_teams et ON et.event_id = e.event_id
+             WHERE e.status = 'waiting'
+             GROUP BY e.event_id
+             ORDER BY e.event_id DESC
+        """)
+        waiting_events = cur.fetchall()
+
+    # лидерборд
+    leaderboard = []
+    if current and current[2] in ('running', 'finished'):
+        cur.execute("""
+            SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
+                   t.team_name,
+                   et.points
+              FROM event_teams et
+              JOIN teams t USING(team_id)
+             WHERE et.event_id=%s
+             ORDER BY et.points DESC
+        """, (current[0],))
+        leaderboard = cur.fetchall()
 
     cur.close(); conn.close()
-
-    all_finished = all(ev[2] == 'finished' for ev in events)
 
     return render_template('events.html',
                            page_title='События',
                            team=team,
-                           events=events,
-                           all_finished=all_finished)
+                           waiting=waiting_events,
+                           current=current,
+                           lb=leaderboard,
+                           show_join=show_join)
+
+
+
 
 
 @app.route('/submit_answer/<int:eid>', methods=['POST'])
