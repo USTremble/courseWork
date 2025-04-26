@@ -7,7 +7,7 @@
     <p>Вы не состоите в команде.</p>
 {% else %}
     {% for e in events %}
-      {# e indexes: 0-id 1-name 2-status 3-type 4-desc 5-my_pts 6-file 7-leaderboard #}
+      {# Индексы:       0-id 1-name 2-status 3-type 4-desc 5-my_pts 6-file 7-leaderboard #}
       <div class="content-box" data-event="{{ e[0] }}"
            style="margin-bottom:16px;position:relative">
         <span class="close"
@@ -16,20 +16,21 @@
 
         <h2>{{ e[1] }} <small>({{ e[2] }})</small></h2>
 
+        {# ───── waiting ───── #}
         {% if e[2] == 'waiting' %}
             Ожидание других команд…
+
+        {# ───── running ───── #}
         {% elif e[2] == 'running' %}
-        {% if e[6] %}
-            <p><a href="{{ url_for('static', filename=e[6]) }}" target="_blank">
-            Скачать задание (PDF)</a></p>
-        {% endif %}
-     
+            {% if e[6] %}
+               <p><a href="{{ url_for('static', filename=e[6]) }}" target="_blank">
+                  Скачать задание (PDF)</a></p>
+            {% endif %}
             <form method="post" action="{{ url_for('submit_answer', eid=e[0]) }}">
                <input name="answer" placeholder="Ответ" required>
                <button class="btn">Отправить</button>
             </form>
 
-            <!-- LEADERBOARD -->
             <h3 style="margin-top:12px">Leaderboard</h3>
             <table class="admin-table" style="max-width:360px">
               <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
@@ -40,8 +41,10 @@
               </tbody>
             </table>
 
-        {% else %}   {# finished #}
+        {# ───── finished ───── #}
+        {% else %}
             <p>Событие завершено.</p>
+
             <h3 style="margin-top:12px">Leaderboard</h3>
             <table class="admin-table" style="max-width:360px">
               <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
@@ -57,7 +60,7 @@
       </div>
     {% endfor %}
 
-    {# форма кода, если нет событий ИЛИ все закончены ИЛИ есть только running #}
+    {# форма ввода кода — только если нет активных waiting/running #}
     {% if not events or all_finished %}
       <form method="post" class="content-box" style="max-width:380px">
         {% for c,m in get_flashed_messages(with_categories=True) %}
@@ -72,7 +75,7 @@
     {% endif %}
 {% endif %}
 
-<!-- JS: localStorage + авто-reload -->
+<!-- JS: localStorage + авто-reload (15 c) -->
 <script>
 function dismissed(){return JSON.parse(localStorage.getItem('dismissedEvents')||'[]')}
 function save(lst){localStorage.setItem('dismissedEvents',JSON.stringify(lst))}
@@ -80,7 +83,6 @@ function save(lst){localStorage.setItem('dismissedEvents',JSON.stringify(lst))}
 document.querySelectorAll('[data-event]').forEach(div=>{
   if(dismissed().includes(+div.dataset.event)) div.remove();
 });
-
 function dismissEvent(id,el){
   el.closest('[data-event]').remove();
   const lst=dismissed(); if(!lst.includes(id)){lst.push(id);save(lst);}
