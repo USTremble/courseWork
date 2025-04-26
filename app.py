@@ -1,13 +1,20 @@
 from flask import (
     Flask, render_template, request, redirect,
-    url_for, flash, session, g
+    url_for, session, g, flash
 )
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 import psycopg2, psycopg2.errors
+import os, random, string
 
+# ========== инициализация Flask ==========
 app = Flask(__name__, template_folder='templates', static_folder='static')
 app.secret_key = '777'
+
+# ========== директория для PDF-заданий ==========
+UPLOAD_DIR = os.path.join(app.static_folder, 'tasks')
+os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 def get_db_connection():
     return psycopg2.connect(
@@ -17,6 +24,9 @@ def get_db_connection():
         host='localhost',
         port='5432'
     )
+
+def random_code(n=6):            # пригодится, если пользователь не ввёл код
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=n))
 
 # ───────── helpers ──────────────────────────────────────────
 def login_required(view):
@@ -155,26 +165,28 @@ def profile():
     team_ids = [r[0] for r in cur.fetchall()]
 
     # история участия
+    # внутри функции profile()   —  вместо предыдущего SELECT history
     cur.execute("""
         SELECT e.event_id,
-               e.name,
-               e.status,
-               NOW()            AS ev_date,          -- используем текущее время
-               my_t.team_name   AS my_team,
-               win_t.team_name  AS winner
-          FROM events e
-          JOIN event_teams my_et   ON my_et.event_id = e.event_id
-          JOIN teams      my_t     ON my_t.team_id   = my_et.team_id
-          LEFT JOIN LATERAL (
+            e.name,
+            e.status,
+            NOW() AS ev_date,                -- можно заменить на e.date, если столбец есть
+            my_t.team_name,
+            win_t.team_name
+        FROM events e
+        JOIN event_teams my_et   ON my_et.event_id = e.event_id
+        JOIN teams      my_t     ON my_t.team_id   = my_et.team_id
+        LEFT JOIN LATERAL (
                 SELECT t.team_name
-                  FROM event_teams et JOIN teams t USING(team_id)
-                 WHERE et.event_id = e.event_id
-                 ORDER BY et.points DESC
-                 LIMIT 1
-          ) win_t ON TRUE
-         WHERE my_et.team_id = ANY(%s)
-         ORDER BY e.event_id DESC
-         LIMIT %s OFFSET %s
+                FROM event_teams et JOIN teams t USING(team_id)
+                WHERE et.event_id = e.event_id
+                ORDER BY et.points DESC
+                LIMIT 1
+        ) win_t ON TRUE
+        WHERE e.status = 'finished'                  -- ←  только завершённые
+        AND my_et.team_id = ANY(%s)
+        ORDER BY e.event_id DESC
+        LIMIT %s OFFSET %s
     """, (team_ids, EVENTS_PER_PAGE, off))
     history = [{
         'date'   : r[3],
@@ -183,6 +195,7 @@ def profile():
         'my_team': r[4],
         'winner' : r[5]
     } for r in cur.fetchall()]
+
 
     # всего записей для пагинации
     cur.execute("""SELECT COUNT(*)
@@ -425,34 +438,40 @@ def team_required():
     return team, members
 
 # ─────────────────────────── EVENTS (игрок) ──────────────────────
+# ───────────────────────── EVENTS (игрок) ─────────────────────────
 @app.route('/events', methods=['GET', 'POST'])
 @login_required
 def events():
     team, _ = current_team()
     if not team:
         return render_template('events.html',
-                           team=None,
-                           page_title='События')
+                               team=None,
+                               page_title='События')
 
-    # POST: присоединение
+    # -------- POST: присоединение по коду --------
     if request.method == 'POST':
         code = request.form['code'][:16]
+
         conn = get_db_connection(); cur = conn.cursor()
-        cur.execute("SELECT event_id FROM events WHERE code=%s", (code,))
+        cur.execute("SELECT event_id, status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
+
         if not ev:
-            flash('Код не найден', 'error')
+            flash('Код не найден', 'modal-join-error')
+        elif ev[1] != 'waiting':
+            flash('Регистрация закрыта', 'modal-join-error')
         else:
             try:
-                cur.execute("""INSERT INTO event_teams(event_id,team_id)
-                               VALUES(%s,%s)""", (ev[0], team['team_id']))
-                conn.commit(); flash('Команда зарегистрирована')
+                cur.execute("""INSERT INTO event_teams(event_id, team_id)
+                               VALUES (%s,%s)""", (ev[0], team['team_id']))
+                conn.commit()
             except psycopg2.errors.UniqueViolation:
-                conn.rollback(); flash('Команда уже участвует', 'error')
+                conn.rollback()
+                flash('Команда уже участвует', 'modal-join-error')
         cur.close(); conn.close()
-        return redirect(url_for('events'))
+        return redirect(url_for('events'))       # PRG-паттерн
 
-    # GET: мои события
+    # -------- GET: мои события + лидерборды --------
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""
         SELECT e.event_id,
@@ -461,26 +480,40 @@ def events():
                e.type,
                e.description,
                et.points,
-               e.file_path,
-               (SELECT t.team_name||' ('||et2.points||')'
-                  FROM event_teams et2 JOIN teams t USING(team_id)
-                 WHERE et2.event_id=e.event_id
-                 ORDER BY et2.points DESC LIMIT 1) AS winner
+               e.file_path
           FROM events e
           JOIN event_teams et USING(event_id)
-         WHERE et.team_id=%s
+         WHERE et.team_id = %s
     """, (team['team_id'],))
-    my_events = cur.fetchall()
+    rows = cur.fetchall()
+
+    events = []
+    for r in rows:
+        ev = list(r)
+        if r[2] in ('running', 'finished'):               # нужна таблица очков
+            cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
+                                  t.team_name,
+                                  et.points
+                             FROM event_teams et
+                             JOIN teams t USING(team_id)
+                            WHERE et.event_id=%s
+                            ORDER BY et.points DESC""",
+                        (r[0],))
+            ev.append(cur.fetchall())     # index 7 = leaderboard list
+        else:
+            ev.append([])                 # пустой лидерборд
+        events.append(ev)
+
     cur.close(); conn.close()
 
-    # нужен флаг «все события = finished»
-    all_finished = all(ev[2] == 'finished' for ev in my_events)
+    all_finished = all(ev[2] == 'finished' for ev in events)
 
     return render_template('events.html',
                            page_title='События',
                            team=team,
-                           events=my_events,
+                           events=events,
                            all_finished=all_finished)
+
 
 @app.route('/submit_answer/<int:eid>', methods=['POST'])
 @login_required
@@ -522,31 +555,46 @@ def moderator_required(view):
         return view(*a,**kw)
     return wrapped
 
-@app.route('/mod/create', methods=['GET','POST'])
+# ─────────────────── СОЗДАТЬ СОБЫТИЕ (модератор) ───────────────────
+@app.route('/mod/create', methods=['GET', 'POST'])
 @moderator_required
 def mod_create():
-    msg=None
-    if request.method=='POST':
-        code=request.form['code'][:16]
-        name=request.form['name'][:64]
-        ev_type=request.form['ev_type']
-        answer=request.form['answer'].strip()
-        desc=request.form['desc']
-        pdf=request.files.get('task')
-        if pdf and pdf.filename.endswith('.pdf'):
-            fp='static/tasks/'+pdf.filename
-            pdf.save(fp)
-            conn=get_db_connection(); cur=conn.cursor()
+    msg = None
+    if request.method == 'POST':
+        code    = request.form['code'][:16] or random_code()
+        name    = request.form['name'][:64]
+        desc    = request.form['desc']
+        ev_type = request.form['ev_type']            # quiz / ctf
+        answer  = request.form['answer'].strip()
+        pdf     = request.files.get('task')
+
+        # ─── валидация PDF ───
+        if not pdf or not pdf.filename.lower().endswith('.pdf'):
+            msg = 'Нужен PDF-файл'
+        else:
+            filename = secure_filename(pdf.filename)            # защищаем имя
+            rel_path = os.path.join('tasks', filename)          #   tasks/quiz1.pdf
+            abs_path = os.path.join(app.static_folder, rel_path)  # static/tasks/quiz1.pdf
+            pdf.save(abs_path)                                  # сохраняем файл
+
+            # ─── вставляем событие ───
+            conn = get_db_connection(); cur = conn.cursor()
             try:
-                cur.execute("""INSERT INTO events(code,name,description,type,answer,file_path,created_by)
-                               VALUES (%s,%s,%s,%s,%s,%s,%s)""",
-                            (code,name,desc,ev_type,answer,fp,session['user_id']))
-                conn.commit(); msg='Создано'
+                cur.execute("""
+                    INSERT INTO events(code,name,description,type,answer,file_path,created_by)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    """,
+                    (code, name, desc, ev_type, answer, rel_path, session['user_id']))
+                conn.commit()
+                msg = 'Событие создано'
             except psycopg2.errors.UniqueViolation:
-                conn.rollback(); msg='Код уже занят'
-            cur.close(); conn.close()
-        else: msg='Нужен PDF'
-    return render_template('mod_create.html', msg=msg)
+                conn.rollback(); msg = 'Код события уже занят'
+            finally:
+                cur.close(); conn.close()
+
+    return render_template('mod_create.html',
+                           page_title='Создать событие',
+                           msg=msg)
 
 @app.route('/mod/manage', methods=['GET', 'POST'])
 @moderator_required
@@ -560,39 +608,50 @@ def mod_manage():
         cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
 
-        if ev:
-            eid = ev[0]
-            if 'start' in request.form:
-                cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
-            elif 'finish' in request.form:
-                cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
-            elif 'pts' in request.form:
-                tid = request.form['tid']; delta = int(request.form['delta'])
-                cur.execute("UPDATE event_teams SET points = points + %s WHERE event_id=%s AND team_id=%s",
-                            (delta, eid, tid))
-            elif 'dq' in request.form:
-                tid = request.form['tid']
-                cur.execute("DELETE FROM event_teams WHERE event_id=%s AND team_id=%s", (eid, tid))
-            conn.commit()
+        # внутри /mod/manage  ─ после получения ev и before render_template
+    if ev:
+        eid = ev[0]
 
-            cur.execute("""
-                SELECT et.team_id,
-                       t.team_name,
-                       et.points,
-                       COALESCE((SELECT answer FROM event_submits s
-                                  WHERE s.team_id = et.team_id
-                                    AND s.event_id = et.event_id
-                                  ORDER BY ts DESC LIMIT 1),'') AS last_answer,
-                       COALESCE((SELECT ts FROM event_submits s
-                                  WHERE s.team_id = et.team_id
-                                    AND s.event_id = et.event_id
-                                  ORDER BY ts DESC LIMIT 1),NULL) AS last_ts
-                  FROM event_teams et
-                  JOIN teams t USING(team_id)
-                 WHERE et.event_id = %s
-                 ORDER BY et.id      -- без сортировки по очкам
-            """, (eid,))
-            teams = cur.fetchall()
+        # обработка кнопок
+        if 'start' in request.form:
+            cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
+        elif 'finish' in request.form:
+            cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
+        elif 'pts' in request.form:
+            tid  = request.form['tid']
+            delta = int(request.form['delta'])
+            cur.execute("""UPDATE event_teams
+                            SET points = points + %s
+                            WHERE event_id = %s AND team_id = %s""",
+                        (delta, eid, tid))
+        elif 'dq' in request.form:                         # ← дисквалификация
+            tid = request.form['tid']
+            cur.execute("DELETE FROM event_teams WHERE event_id=%s AND team_id=%s",
+                        (eid, tid))
+        conn.commit()
+
+        # выборка команд события  (без сортировки по очкам)
+        cur.execute("""
+            SELECT et.team_id,
+                t.team_name,
+                et.points,
+                COALESCE((SELECT answer
+                            FROM event_submits s
+                            WHERE s.team_id = et.team_id
+                                AND s.event_id = et.event_id
+                            ORDER BY ts DESC LIMIT 1),'') AS last_answer,
+                COALESCE((SELECT ts
+                            FROM event_submits s
+                            WHERE s.team_id = et.team_id
+                                AND s.event_id = et.event_id
+                            ORDER BY ts DESC LIMIT 1),NULL) AS last_ts
+            FROM event_teams et
+            JOIN teams t USING(team_id)
+            WHERE et.event_id = %s
+            ORDER BY et.id                                  -- ← сортировка по id
+        """, (eid,))
+        teams = cur.fetchall()
+
     cur.close(); conn.close()
 
     return render_template('mod_manage.html',

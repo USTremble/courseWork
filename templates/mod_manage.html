@@ -19,12 +19,14 @@
 
   {# ───── кнопки показываем только пока не finished ───── #}
   {% if ev[2] != 'finished' %}
-    <form method="post" style="display:flex;gap:12px;margin-bottom:12px">
-        <input type="hidden" name="code" value="{{ code_entered }}">
-        <button name="start"  class="btn">Начать событие</button>
-        <button name="finish" class="btn btn-outline">Завершить</button>
-    </form>
-  {% endif %}
+  <form method="post" style="display:flex;gap:12px;margin-bottom:12px">
+    <input type="hidden" name="code" value="{{ code_entered }}">
+    {% if ev[2] == 'waiting' %}
+       <button name="start"  class="btn">Начать событие</button>
+    {% endif %}
+    <button name="finish" class="btn btn-outline">Завершить</button>
+  </form>
+{% endif %}
 
   <table class="admin-table">
     <thead><tr>

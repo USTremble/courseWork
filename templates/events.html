@@ -3,76 +3,88 @@
 {% block content %}
 <h1>События</h1>
 
-{% for cat,msg in get_flashed_messages(with_categories=True) %}
-  <p style="color:{% if cat=='error' %}#ff7070{% else %}var(--accent){% endif %};">{{ msg }}</p>
-{% endfor %}
-
 {% if not team %}
-  <p>Вы не состоите в команде.</p>
+    <p>Вы не состоите в команде.</p>
 {% else %}
-  {% if events %}
-      {% for e in events %}
-      <div class="content-box"
-     data-event="{{ e[0] }}"
-     style="margin-bottom:16px; position:relative">
-  <span class="close"
-        style="position:absolute;right:12px;top:10px;cursor:pointer;font-size:1.2rem"
-        onclick="dismissEvent({{ e[0] }}, this)">✖</span>
-            <h2>{{ e[1] }} <small>({{ e[2] }})</small></h2>
+    {% for e in events %}
+      {# e indexes: 0-id 1-name 2-status 3-type 4-desc 5-my_pts 6-file 7-leaderboard #}
+      <div class="content-box" data-event="{{ e[0] }}"
+           style="margin-bottom:16px;position:relative">
+        <span class="close"
+              style="position:absolute;right:12px;top:10px;cursor:pointer;font-size:1.2rem"
+              onclick="dismissEvent({{ e[0] }}, this)">✖</span>
 
-            {% if e[2] == 'waiting' %}
-                Ожидание других команд…
-            {% elif e[2] == 'running' %}
-                {% if e[6] %}
-                    <p><a href="{{ url_for('static', filename=e[6]) }}" target="_blank">
-                        Скачать задание (PDF)</a></p>
-                {% endif %}
-                <form method="post" action="{{ url_for('submit_answer', eid=e[0]) }}">
-                    <input name="answer" placeholder="Ответ" required>
-                    <button class="btn">Отправить</button>
-                </form>
-            {% else %}
-                <p>Событие завершено.</p>
-            {% endif %}
+        <h2>{{ e[1] }} <small>({{ e[2] }})</small></h2>
 
-            <p style="margin-top:8px">
-                Ваши очки:   <strong>{{ e[5] }}</strong><br>
-                Победители: <strong>{{ e[7] }}</strong>
-            </p>
-            </div>
+        {% if e[2] == 'waiting' %}
+            Ожидание других команд…
+        {% elif e[2] == 'running' %}
+        {% if e[6] %}
+            <p><a href="{{ url_for('static', filename=e[6]) }}" target="_blank">
+            Скачать задание (PDF)</a></p>
+        {% endif %}
+     
+            <form method="post" action="{{ url_for('submit_answer', eid=e[0]) }}">
+               <input name="answer" placeholder="Ответ" required>
+               <button class="btn">Отправить</button>
+            </form>
+
+            <!-- LEADERBOARD -->
+            <h3 style="margin-top:12px">Leaderboard</h3>
+            <table class="admin-table" style="max-width:360px">
+              <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
+              <tbody>
+                 {% for row in e[7] %}
+                   <tr><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td></tr>
+                 {% endfor %}
+              </tbody>
+            </table>
+
+        {% else %}   {# finished #}
+            <p>Событие завершено.</p>
+            <h3 style="margin-top:12px">Leaderboard</h3>
+            <table class="admin-table" style="max-width:360px">
+              <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
+              <tbody>
+                 {% for row in e[7] %}
+                   <tr><td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td></tr>
+                 {% endfor %}
+              </tbody>
+            </table>
+        {% endif %}
+
+        <p style="margin-top:8px">Ваши очки: <strong>{{ e[5] }}</strong></p>
+      </div>
+    {% endfor %}
+
+    {# форма кода, если нет событий ИЛИ все закончены ИЛИ есть только running #}
+    {% if not events or all_finished %}
+      <form method="post" class="content-box" style="max-width:380px">
+        {% for c,m in get_flashed_messages(with_categories=True) %}
+          {% if c == 'modal-join-error' %}
+            <p style="color:#ff7070">{{ m }}</p>
+          {% endif %}
         {% endfor %}
+        <label>Код события</label>
+        <input name="code" required style="width:100%;padding:8px;margin:8px 0">
+        <button class="btn">Присоединиться</button>
+      </form>
     {% endif %}
-
-  {% if not events or all_finished %}
-    <form method="post" class="content-box" style="max-width:380px">
-      <label>Код события</label>
-      <input name="code" required style="width:100%;padding:8px;margin:8px 0">
-      <button class="btn">Присоединиться</button>
-    </form>
-  {% endif %}
 {% endif %}
 
-<!-- авто-перезагрузка + запоминание закрытых карточек -->
+<!-- JS: localStorage + авто-reload -->
 <script>
-    function dismissedList(){
-      return JSON.parse(localStorage.getItem('dismissedEvents') || '[]');
-    }
-    function saveList(lst){
-      localStorage.setItem('dismissedEvents', JSON.stringify(lst));
-    }
-    
-    /* скрываем сохранённые */
-    document.querySelectorAll('[data-event]').forEach(div=>{
-       const id = +div.dataset.event;
-       if (dismissedList().includes(id)) div.remove();
-    });
-    
-    /* закрыть карточку + запомнить */
-    function dismissEvent(id, el){
-       const box = el.closest('[data-event]');
-       box && box.remove();
-       const lst = dismissedList();
-       if (!lst.includes(id)){ lst.push(id); saveList(lst); }
-    }
-    </script>
+function dismissed(){return JSON.parse(localStorage.getItem('dismissedEvents')||'[]')}
+function save(lst){localStorage.setItem('dismissedEvents',JSON.stringify(lst))}
+
+document.querySelectorAll('[data-event]').forEach(div=>{
+  if(dismissed().includes(+div.dataset.event)) div.remove();
+});
+
+function dismissEvent(id,el){
+  el.closest('[data-event]').remove();
+  const lst=dismissed(); if(!lst.includes(id)){lst.push(id);save(lst);}
+}
+
+</script>
 {% endblock %}
