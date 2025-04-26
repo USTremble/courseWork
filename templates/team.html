@@ -4,68 +4,89 @@
 <h1>Команда</h1>
 
 {% if not team %}
-    {% if get_flashed_messages(with_categories=True) %}
-    {% for cat,msg in get_flashed_messages(with_categories=True) %}
-        <p style="color:{% if cat=='error' %}#ff7070{% else %}var(--accent){% endif %};">{{ msg }}</p>
-    {% endfor %}
-    {% endif %}
-  <div class="content-box" style="display:flex;gap:20px">
-      <button class="btn" data-modal="createModal">Создать команду</button>
-      <button class="btn btn-outline" data-modal="joinModal">Присоединиться</button>
+  <!-- формы создания / присоединения (как было) -->
+  <div class="content-box" style="max-width:380px">
+    <h3>Создать команду</h3>
+    <form method="post" action="{{ url_for('create_team') }}">
+      <label>Название (≥3 символа)</label>
+      <input name="team_name" required>
+      <label>Код приглашения (необязательно)</label>
+      <input name="invite_code">
+      {% for c,m in get_flashed_messages(with_categories=True) if c=='modal-create-error' %}
+        <p style="color:#ff7070">{{ m }}</p>{% endfor %}
+      <button class="btn">Создать</button>
+    </form>
   </div>
+
+  <div class="content-box" style="max-width:380px">
+    <h3>Присоединиться к команде</h3>
+    <form method="post" action="{{ url_for('join_team') }}">
+      <label>Код приглашения</label>
+      <input name="invite_code" required>
+      {% for c,m in get_flashed_messages(with_categories=True) if c=='modal-join-error' %}
+        <p style="color:#ff7070">{{ m }}</p>{% endfor %}
+      <button class="btn">Присоединиться</button>
+    </form>
+  </div>
+
 {% else %}
-    <div class="content-box">
-        <h2>{{ team.team_name }}</h2>
-        <p>{{ team.description }}</p>
-        <table class="admin-table" style="margin-top:16px">
-            <thead><tr><th>UID</th><th>Логин</th></tr></thead>
-            <tbody>
-                {% for m in members %}<tr><td>{{ m.user_id }}</td><td>{{ m.username }}</td></tr>{% endfor %}
-            </tbody>
-        </table>
-        <form method="post" action="{{ url_for('leave_team') }}">
-            <button class="btn btn-outline" style="margin-top:16px">Покинуть команду</button>
-        </form>
-    </div>
-{% endif %}
-
-<!-- ─ modal create ─ -->
-<div class="modal" id="createModal">
-    <div class="modal-content">
-      <span class="close">✖</span>
-      <h3>Новая команда</h3>
-  
-      {% for c,m in get_flashed_messages(with_categories=True) %}
-        {% if c == 'modal-create-error' %}
-          <p style="color:#ff7070">{{ m }}</p>
-        {% endif %}
-      {% endfor %}
-  
-      <form method="post" action="{{ url_for('create_team') }}">
-        <label>Название</label><input name="team_name" required>
-        <label>Код-приглашение (необязательно)</label><input name="invite_code">
-        <button class="btn" style="margin-top:12px">Создать</button>
-      </form>
-    </div>
+  <!-- информация о команде -->
+  <div class="content-box">
+    <h2>{{ team.team_name }}</h2>
+    <p>ID: {{ team.team_id }}</p>
+    <form method="post" action="{{ url_for('leave_team') }}">
+      <button class="btn btn-outline" onclick="return confirm('Покинуть команду?')">
+        Покинуть команду
+      </button>
+    </form>
   </div>
-  
 
-<!-- ─ modal join ─ -->
-<div class="modal" id="joinModal">
-    <div class="modal-content">
-      <span class="close">✖</span>
-      <h3>Код приглашения</h3>
-  
-      {% for c,m in get_flashed_messages(with_categories=True) %}
-        {% if c == 'modal-join-error' %}
-          <p style="color:#ff7070">{{ m }}</p>
-        {% endif %}
+  <!-- участники -->
+  <div class="content-box" style="margin-top:20px;max-width:360px">
+    <h3>Участники</h3>
+    <ul>
+      {% for m in members %}
+        <li>{{ m.username }} (UID {{ m.user_id }})</li>
       {% endfor %}
-  
-      <form method="post" action="{{ url_for('join_team') }}">
-        <input name="invite_code" required>
-        <button class="btn" style="margin-top:12px">Присоединиться</button>
-      </form>
-    </div>
-</div>
+    </ul>
+  </div>
+
+  <!-- статистика -->
+  <div class="content-box" style="margin-top:20px;max-width:360px">
+    <h3>Статистика игрока</h3>
+    <p>Событий: <strong>{{ stats.total }}</strong></p>
+    <p>Побед : <strong>{{ stats.wins }}</strong></p>
+  </div>
+
+  <!-- история -->
+  <div class="content-box" style="margin-top:20px">
+    <h3>История событий</h3>
+    {% if history %}
+      <table class="admin-table">
+        <thead><tr><th>Дата</th><th>Событие</th><th>Моя команда</th><th>Победитель</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+          <tr>
+            <td>{{ h.date.strftime('%d.%m.%Y') }}</td>
+            <td>{{ h.name }}</td>
+            <td>{{ h.my_team }}</td>
+            <td>{{ h.winner }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+
+      {% if pages>1 %}
+        <div style="margin-top:8px">
+          {% for p in range(1,pages+1) %}
+            {% if p==page %}<strong>{{ p }}</strong>
+            {% else %}<a href="{{ url_for('team', page=p) }}">{{ p }}</a>{% endif %}
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% else %}
+      <p>Ещё нет завершённых событий.</p>
+    {% endif %}
+  </div>
+{% endif %}
 {% endblock %}

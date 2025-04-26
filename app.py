@@ -16,6 +16,8 @@ app.secret_key = '777'
 UPLOAD_DIR = os.path.join(app.static_folder, 'tasks')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+EVENTS_PER_PAGE = 10           # оставьте, если уже объявлено выше
+
 def get_db_connection():
     return psycopg2.connect(
         dbname='competition',
@@ -182,75 +184,20 @@ def user_stats(uid: int) -> dict:
     return {'total': total, 'wins': wins}
 
 # ─────────────────────────── PROFILE ──────────────────────────────
-EVENTS_PER_PAGE = 10           # оставьте, если уже объявлено выше
-
 @app.route('/profile')
 @login_required
 def profile():
-    uid   = session['user_id']
-    page  = max(int(request.args.get('page', 1)), 1)
-    off   = (page - 1) * EVENTS_PER_PAGE
-
-    stats = user_stats(uid)
-
-    conn = get_db_connection(); cur = conn.cursor()
-    cur.execute("SELECT is_blocked FROM users WHERE user_id=%s", (uid,))
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute("SELECT is_blocked FROM users WHERE user_id=%s", (session['user_id'],))
     is_blocked = cur.fetchone()[0]
-
-    # все команды пользователя
-    cur.execute("SELECT team_id FROM team_members WHERE user_id=%s", (uid,))
-    team_ids = [r[0] for r in cur.fetchall()]
-
-    # история участия
-    # внутри функции profile()   —  вместо предыдущего SELECT history
-    cur.execute("""
-        SELECT e.event_id,
-            e.name,
-            e.status,
-            NOW() AS ev_date,                -- можно заменить на e.date, если столбец есть
-            my_t.team_name,
-            win_t.team_name
-        FROM events e
-        JOIN event_teams my_et   ON my_et.event_id = e.event_id
-        JOIN teams      my_t     ON my_t.team_id   = my_et.team_id
-        LEFT JOIN LATERAL (
-                SELECT t.team_name
-                FROM event_teams et JOIN teams t USING(team_id)
-                WHERE et.event_id = e.event_id
-                ORDER BY et.points DESC
-                LIMIT 1
-        ) win_t ON TRUE
-        WHERE e.status = 'finished'                  -- ←  только завершённые
-        AND my_et.team_id = ANY(%s)
-        ORDER BY e.event_id DESC
-        LIMIT %s OFFSET %s
-    """, (team_ids, EVENTS_PER_PAGE, off))
-    history = [{
-        'date'   : r[3],
-        'name'   : r[1],
-        'status' : r[2],
-        'my_team': r[4],
-        'winner' : r[5]
-    } for r in cur.fetchall()]
-
-
-    # всего записей для пагинации
-    cur.execute("""SELECT COUNT(*)
-                     FROM event_teams
-                    WHERE team_id = ANY(%s)""", (team_ids,))
-    total = cur.fetchone()[0]
-    pages = (total + EVENTS_PER_PAGE - 1) // EVENTS_PER_PAGE
-
     cur.close(); conn.close()
 
     return render_template('profile.html',
                            page_title='Профиль',
-                           stats=stats,
                            is_blocked=is_blocked,
-                           history=history,
-                           page=page, pages=pages,
                            pass_msg=request.args.get('pm'),
-                           pass_ok=request.args.get('ok') == '1')
+                           pass_ok=request.args.get('ok')=='1')
+
 
 
 @app.route('/change_password', methods=['POST'])
@@ -311,8 +258,82 @@ def current_team():
 @app.route('/team')
 @login_required
 def team():
-    ti,mem=current_team()
-    return render_template('team.html', page_title='Команда', team=ti, members=mem)
+    ti, members = current_team()
+    # формы «создать / присоединиться» остаются прежними — показываем их,
+    # если команды нет
+    if not ti:
+        return render_template('team.html',
+                               page_title='Команда',
+                               team=None, members=[])
+
+    # ─── статистика и история ───
+    uid   = session['user_id']
+    page  = max(int(request.args.get('page', 1)), 1)
+    off   = (page - 1) * EVENTS_PER_PAGE
+
+    conn  = get_db_connection(); cur = conn.cursor()
+    stats = user_stats(uid)
+    history, total = fetch_history(cur, uid, EVENTS_PER_PAGE, off)
+    cur.close(); conn.close()
+    pages = (total + EVENTS_PER_PAGE - 1)//EVENTS_PER_PAGE
+
+    return render_template('team.html',
+                           page_title='Команда',
+                           team=ti, members=members,
+                           stats=stats, history=history,
+                           page=page, pages=pages)
+
+# ───────── история игрока (по событиям) ─────────
+def fetch_history(cur, uid: int, limit: int, off: int):
+    """
+    Возвращает (history_list, total_rows), где history_list —
+    список словарей: {'date', 'name', 'my_team', 'winner'}
+    """
+    SQL = """
+        SELECT e.event_id,
+               e.name,
+               COALESCE(e.finished_at, NOW())        AS dt,
+               t.team_name                           AS my_team,
+               win.team_name                         AS winner
+          FROM events         e
+          JOIN event_submits  s  ON s.event_id = e.event_id
+          JOIN teams          t  ON t.team_id  = s.team_id
+          LEFT JOIN LATERAL (
+                SELECT t2.team_name
+                  FROM event_teams et2
+                  JOIN teams t2 USING(team_id)
+                 WHERE et2.event_id = e.event_id
+                 ORDER BY et2.points DESC LIMIT 1
+          ) win ON TRUE
+         WHERE s.user_id = %s
+           AND e.status  = 'finished'
+         GROUP BY e.event_id,e.name,dt,my_team,winner
+         ORDER BY e.event_id DESC
+         LIMIT %s OFFSET %s
+    """
+
+    try:
+        cur.execute(SQL, (uid, limit, off))
+    except psycopg2.errors.UndefinedColumn:
+        # поля finished_at нет — делаем резервную выборку без него
+        cur.connection.rollback()
+        SQL_fallback = SQL.replace("COALESCE(e.finished_at, NOW())", "NOW()")
+        cur.execute(SQL_fallback, (uid, limit, off))
+
+    rows = cur.fetchall()
+    history = [{'date': r[2], 'name': r[1],
+                'my_team': r[3], 'winner': r[4]} for r in rows]
+
+    # сколько всего событий в истории
+    cur.execute("""
+        SELECT COUNT(DISTINCT e.event_id)
+          FROM events e JOIN event_submits s ON s.event_id = e.event_id
+         WHERE s.user_id = %s AND e.status = 'finished'
+    """, (uid,))
+    total = cur.fetchone()[0]
+
+    return history, total
+
 
 # ───── вспомогательная уникальная строка для invite_code ─────
 def unique_code(conn, length=6):

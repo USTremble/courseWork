@@ -1,68 +1,32 @@
 {% extends 'base.html' %}
 {% block title %}Профиль{% endblock %}
 {% block content %}
-
 <h1>Профиль</h1>
 
-<div class="content-box">
-    <h2>Статистика</h2>
-    <p>Статус:
-        {% if is_blocked %}
-           <span style="color:#ff7070">Заблокирован</span>
-        {% else %}
-           <span style="color:#4caf50">Активен</span>
-        {% endif %}
-    </p>
-    <p>Событий: <strong>{{ stats.total }}</strong></p>
-    <p>Побед:   <strong>{{ stats.wins  }}</strong></p>
+{% if is_blocked %}
+  <p style="color:#e05555">Аккаунт заблокирован</p>
+{% endif %}
 
-    <h2 style="margin-top:24px">История событий</h2>
-    <table class="admin-table">
-        <thead><tr><th>Дата</th><th>Событие</th><th>Моя команда</th><th>Победитель</th></tr></thead>
-        <tbody>
-        {% for ev in history %}
-           <tr>
-              <td>{{ ev.date.strftime('%d.%m.%Y') }}</td>
-              <td>{{ ev.name }}</td>
-              <td>{{ ev.my_team }}</td>
-              <td>{{ ev.winner }}</td>
-           </tr>
-        {% endfor %}
-        </tbody>
-    </table>
-    <div class="table-pagination">
-        {% for p in range(1, pages+1) %}
-            {% if p==page %}<strong>{{ p }}</strong>
-            {% else %}<a href="{{ url_for('profile', page=p) }}">{{ p }}</a>{% endif %}
-        {% endfor %}
-    </div>
-
-    <h2 style="margin-top:32px">Смена пароля</h2>
-    {% if pass_msg %}
-        <p style="color:{{ '#4caf50' if pass_ok else '#ff7070' }}">{{ pass_msg }}</p>
-    {% endif %}
-    <form method="post" action="{{ url_for('change_password') }}">
-        <label>Текущий пароль</label>
-        <input type="password" name="old" required>
-        <label>Новый пароль</label>
-        <input type="password" name="new" required>
-        <button class="btn" style="margin-top:16px">Сменить пароль</button>
-    </form>
-
-    <h2 style="margin-top:32px">Удаление аккаунта</h2>
-    <button class="btn" id="delAccountBtn" style="background:#e04545">Удалить аккаунт</button>
+<!-- смена пароля -->
+<div class="content-box" style="max-width:360px">
+  <h3>Сменить пароль</h3>
+  {% if pass_msg %}
+    <p style="color:{{ 'green' if pass_ok else '#e05555' }}">{{ pass_msg }}</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('change_password') }}">
+     <label>Старый пароль</label><input type="password" name="old" required>
+     <label>Новый пароль</label><input type="password" name="new" required>
+     <button class="btn">Сохранить</button>
+  </form>
 </div>
 
-<!-- модалка подтверждения -->
-<div class="modal" id="delModal">
-  <div class="modal-content">
-    <span class="close" style="cursor:pointer;float:right;font-size:1.3rem">✖</span>
-    <h3>Вы точно хотите удалить аккаунт?</h3>
-    <form method="post" action="{{ url_for('delete_account') }}">
-        <label>Введите пароль для подтверждения</label>
-        <input type="password" name="pwd" required>
-        <button class="btn" style="background:#e04545;margin-top:12px">Подтвердить удаление</button>
-    </form>
-  </div>
+<!-- удалить аккаунт -->
+<div class="content-box" style="max-width:360px;margin-top:20px">
+  <h3 style="color:#e05555">Удалить аккаунт</h3>
+  <form method="post" action="{{ url_for('delete_account') }}"
+        onsubmit="return confirm('Удалить аккаунт безвозвратно?')">
+     <label>Пароль</label><input type="password" name="pwd" required>
+     <button class="btn btn-danger">Удалить</button>
+  </form>
 </div>
 {% endblock %}
