@@ -8,7 +8,7 @@
   <p>Нужно состоять в команде.</p>
 {% else %}
 
-  {# ---------- если команда уже в событии ---------- #}
+  {# команда уже в активном событии waiting / running #}
   {% if cur_ev %}
     <div class="content-box">
       <h2>{{ cur_ev[1] }}</h2>
@@ -24,14 +24,11 @@
         {% if cur_ev[5] %}
           <p style="margin-top:8px">
             <a href="{{ url_for('static', filename=cur_ev[5]) }}" class="btn" download>
-              Скачать&nbsp;задание&nbsp;(PDF)
+              Скачать задание (PDF)
             </a>
           </p>
-
-          <form method="post" action="{{ url_for('submit_answer', eid=cur_ev[0]) }}"
-                style="margin-top:14px">
-            <input name="answer" placeholder="Ответ"
-                   style="padding:6px 8px;width:240px" required>
+          <form method="post" action="{{ url_for('submit_answer', eid=cur_ev[0]) }}" style="margin-top:14px">
+            <input name="answer" placeholder="Ответ" style="padding:6px 8px;width:240px" required>
             <button class="btn">Отправить</button>
           </form>
         {% endif %}
@@ -51,27 +48,46 @@
     </div>
 
   {% else %}
-    {# ---------- форма «присоединиться по коду» ---------- #}
+    {# подключение по коду #}
     <div class="content-box" style="max-width:420px">
-      <h3>Присоединиться по&nbsp;коду</h3>
+      <h3>Присоединиться по коду</h3>
       <form method="post">
-        <input name="code" placeholder="Код события"
-               style="padding:6px 8px;width:220px" maxlength="16" required>
+        <input name="code" placeholder="Код события" maxlength="16" style="padding:6px 8px;width:220px" required>
         <button class="btn">Присоединиться</button>
       </form>
     </div>
 
-    {# ---------- доступные waiting-события ---------- #}
+    {# последний завершённый лидерборд #}
+    {% if last_ev %}
+      <div class="content-box" id="lastLbBox" data-eid="{{ last_ev[0] }}" style="margin-top:24px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">{{ last_ev[1] }} — лидерборд</h3>
+          <button class="btn btn-outline close-lb" type="button">&#10006;</button>
+        </div>
+        <table class="admin-table small" style="margin-top:12px">
+          <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
+          <tbody>
+          {% for row in finished_lb %}
+            <tr {% if row[1]==winner %}style="background:#e1f7ee"{% endif %}>
+              <td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <p style="margin-top:8px"><strong>Победитель:</strong> {{ winner }}</p>
+      </div>
+    {% endif %}
+
+    {# waiting-события #}
     {% if waiting %}
-      <h3 style="margin-top:28px">Доступные события</h3>
+      <h3 style="margin-top:28px">Доступные события</h3>
       <div class="card-grid">
         {% for w in waiting %}
           <div class="card">
             <h4>{{ w[1] }}</h4>
             <p>Тип: {{ w[2]|upper }}</p>
             <p>{{ w[3] }}</p>
-            <p>Команд в очереди: {{ w[4] }}</p>
-
+            <p>Команд в очереди: {{ w[4] }}</p>
             <form method="post">
               <input type="hidden" name="join_event" value="{{ w[0] }}">
               <button class="btn">Участвовать</button>
@@ -80,20 +96,44 @@
         {% endfor %}
       </div>
     {% else %}
-      <p style="margin-top:20px">Нет активных событий.</p>
+      <p style="margin-top:20px">Нет активных событий.</p>
     {% endif %}
   {% endif %}
 {% endif %}
-{% endblock %}
 
-<style>
-.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:12px}
-.card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-.card h4{margin:0 0 6px 0}
-.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
-.admin-table{border-collapse:collapse;width:100%}
-.admin-table.small td,.admin-table.small th{padding:4px 6px}
-.admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
-.admin-table thead{background:#f0f6fa;font-weight:600}
-</style>
+  <style>
+  .content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;
+               box-shadow:0 2px 6px rgba(0,0,0,.06)}
+  .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:12px}
+  .card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;
+        box-shadow:0 2px 6px rgba(0,0,0,.06)}
+  .card h4{margin:0 0 6px}
+  .btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;
+       border-radius:4px;cursor:pointer}
+  .btn-outline{background:#fff;color:#0084c6;border:1px solid #0084c6}
+  .admin-table{border-collapse:collapse;width:100%}
+  .admin-table.small td,.admin-table.small th{padding:4px 6px}
+  .admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;
+                                    text-align:center}
+  .admin-table thead{background:#f0f6fa;font-weight:600}
+  </style>
+
+  <script>
+  document.addEventListener('DOMContentLoaded', () => {
+    const lb = document.getElementById('lastLbBox');
+    if (!lb) return;
+    const eid = lb.dataset.eid;
+    const key = 'hide_lb_' + eid;
+    if (localStorage.getItem(key) === '1') {
+      lb.style.display = 'none';
+    }
+    const btn = lb.querySelector('.close-lb');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        lb.style.display = 'none';
+        localStorage.setItem(key, '1');
+      });
+    }
+  });
+  </script>
+{% endblock %}

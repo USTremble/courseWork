@@ -6,7 +6,8 @@ from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 import psycopg2, psycopg2.errors
-import os, random, string
+import os, random, string, re
+from psycopg2.errors import NumericValueOutOfRange
 
 # ========== инициализация Flask ==========
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -665,21 +666,57 @@ def admin_user_action():
     if not session: return redirect(url_for('index'))
     return redirect(request.referrer or url_for('admin_users'))
 
+
 @app.route('/admin/team_action', methods=['POST'])
 @admin_required
 def admin_team_action():
-    tid,act=request.form['tid'],request.form['act']
-    conn=get_db_connection(); cur=conn.cursor()
-    if act=='delete':
-        cur.execute("DELETE FROM teams WHERE team_id=%s",(tid,))
-    elif act=='disband':
-        cur.execute("DELETE FROM team_members WHERE team_id=%s",(tid,))
-    elif act=='kick':
-        uid=request.form.get('kick_uid')
-        if uid:
-            cur.execute("DELETE FROM team_members WHERE team_id=%s AND user_id=%s",(tid,uid))
+    tid      = request.form.get('tid')
+    act      = request.form.get('act')
+    kick_uid = request.form.get('kick_uid')
+
+    # если дисквалификация — проверяем формат и наличие участника
+    if act == 'kick':
+        # формат: положительное целое
+        if not kick_uid or not re.fullmatch(r'[1-9]\d*', kick_uid):
+            session['kick_error_tid'] = tid
+            return redirect(request.referrer or url_for('admin_teams'))
+
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        # проверяем, что такой активный участник есть
+        cur.execute("""
+            SELECT 1
+              FROM team_members
+             WHERE team_id = %s
+               AND user_id = %s
+               AND active = TRUE
+        """, (tid, kick_uid))
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            session['kick_error_tid'] = tid
+            return redirect(request.referrer or url_for('admin_teams'))
+
+        # всё ок — удаляем
+        cur.execute(
+            "DELETE FROM team_members WHERE team_id = %s AND user_id = %s",
+            (tid, kick_uid)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return redirect(request.referrer or url_for('admin_teams'))
+
+    # остальные действия
+    conn = get_db_connection(); cur = conn.cursor()
+    if act == 'delete':
+        cur.execute("DELETE FROM teams WHERE team_id = %s", (tid,))
+    elif act == 'disband':
+        cur.execute("DELETE FROM team_members WHERE team_id = %s", (tid,))
     conn.commit(); cur.close(); conn.close()
+
     return redirect(request.referrer or url_for('admin_teams'))
+
 
 # ───────────────── EVENTS (игрок) ─────────────────
 
@@ -694,7 +731,6 @@ def team_has_blocked(team_id, cur) -> bool:
     return cur.fetchone() is not None
 
 
-# ───────────────────────── EVENTS (игрок) ─────────────────────────
 # ───────────────── EVENTS (игрок) ───────────────────────────────
 @app.route('/events', methods=['GET', 'POST'])
 @login_required
@@ -726,7 +762,7 @@ def events():
                 except psycopg2.errors.UniqueViolation:
                     conn.rollback(); flash('Команда уже участвует','modal-join-error')
 
-        # 2) присоединение кнопкой «Участвовать» (карточка)
+        # 2) «Участвовать» из карточки
         elif 'join_event' in request.form:
             eid = request.form['join_event']
             try:
@@ -737,11 +773,10 @@ def events():
                 conn.rollback()
 
         cur.close(); conn.close()
-        return redirect(url_for('events'))            # PRG-паттерн
+        return redirect(url_for('events'))          # PRG-паттерн
 
     # ---------- GET ----------
-
-    # 1) текущий ивент команды (waiting / running)
+    # 1) активное событие (waiting / running)
     cur.execute("""
         SELECT e.event_id,e.name,e.status,e.type,e.description,e.file_path
           FROM events e
@@ -752,8 +787,8 @@ def events():
     cur_ev = cur.fetchone()
 
     leaderboard = []
-    if cur_ev and cur_ev[2] in ('running',):
-        cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
+    if cur_ev and cur_ev[2] == 'running':
+        cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC),
                               t.team_name, et.points
                          FROM event_teams et
                          JOIN teams t USING(team_id)
@@ -762,7 +797,30 @@ def events():
                     (cur_ev[0],))
         leaderboard = cur.fetchall()
 
-    # 2) доступные waiting-события, куда команда ещё НЕ записана
+    # 2) последнее завершённое событие команды
+    cur.execute("""
+        SELECT e.event_id,e.name,e.type,e.description
+          FROM events e
+          JOIN event_teams et USING(event_id)
+         WHERE et.team_id=%s AND e.status='finished'
+         ORDER BY e.event_id DESC LIMIT 1
+    """, (team['team_id'],))
+    last_ev = cur.fetchone()
+
+    finished_lb = []; winner = None
+    if last_ev:
+        cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC),
+                              t.team_name, et.points
+                         FROM event_teams et
+                         JOIN teams t USING(team_id)
+                        WHERE et.event_id=%s
+                        ORDER BY et.points DESC""",
+                    (last_ev[0],))
+        finished_lb = cur.fetchall()
+        if finished_lb:
+            winner = finished_lb[0][1]
+
+    # 3) waiting-события, куда команда ещё не записана
     cur.execute("""
         SELECT e.event_id,e.name,e.type,e.description,
                (SELECT COUNT(*) FROM event_teams et
@@ -783,7 +841,11 @@ def events():
                            team=team,
                            cur_ev=cur_ev,
                            leaderboard=leaderboard,
-                           waiting=waiting)
+                           waiting=waiting,
+                           last_ev=last_ev,
+                           finished_lb=finished_lb,
+                           winner=winner)
+
 
 
 
@@ -884,43 +946,59 @@ def mod_create():
                            link=link)
 
 
+# ─────────────────────────── ПРОВЕДЕНИЕ СОБЫТИЯ (модератор) ──────────────────
 @app.route('/mod/manage', methods=['GET', 'POST'])
 @moderator_required
 def mod_manage():
     code = request.values.get('code', '').strip()[:16]
-    ev   = teams = None
-    active = []                      # карточки waiting / running
+    ev = teams = None
+    active_events = []
 
     conn = get_db_connection(); cur = conn.cursor()
 
-    # ---------- POST ----------
     if request.method == 'POST':
         cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
         if ev:
             eid, _, status = ev
 
-            if 'start' in request.form and status == 'waiting':
-                cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
-            elif 'finish' in request.form and status != 'finished':
-                cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
-            elif 'delta' in request.form and status != 'finished':
-                cur.execute("""UPDATE event_teams
-                                 SET points = GREATEST(points + %s, 0)
-                               WHERE event_id=%s AND team_id=%s""",
-                            (int(request.form['delta']),
-                             eid,
-                             int(request.form['tid'])))
-            elif 'dq' in request.form and status != 'finished':
-                cur.execute("DELETE FROM event_teams WHERE event_id=%s AND team_id=%s",
-                            (eid, int(request.form['tid'])))
+            try:
+                # старт / финиш
+                if 'start' in request.form and status == 'waiting':
+                    cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
+                elif 'finish' in request.form and status != 'finished':
+                    cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
 
-            conn.commit()
+                # дисквалификация
+                elif request.form.get('dq') and status != 'finished':
+                    cur.execute(
+                        "DELETE FROM event_teams WHERE event_id=%s AND team_id=%s",
+                        (eid, int(request.form['tid']))
+                    )
+
+                # добавление/вычитание очков
+                elif request.form.get('delta') and status != 'finished':
+                    cur.execute(
+                        """
+                        UPDATE event_teams
+                           SET points = GREATEST(points + %s, 0)
+                         WHERE event_id=%s AND team_id=%s
+                        """,
+                        (int(request.form['delta']), eid, int(request.form['tid']))
+                    )
+
+                conn.commit()
+            except NumericValueOutOfRange:
+                conn.rollback()
+                flash('Слишком большое число очков', 'error')
+            except Exception as e:
+                conn.rollback()
+                flash(f'Ошибка: {e}', 'error')
 
         cur.close(); conn.close()
         return redirect(url_for('mod_manage', code=code))
 
-    # ---------- GET ----------
+    # GET: если ввели код — показываем команды в событии
     if code:
         cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
@@ -940,31 +1018,33 @@ def mod_manage():
                          WHERE s.team_id = et.team_id
                            AND s.event_id = et.event_id
                          ORDER BY ts DESC
-                         LIMIT 1) ls ON TRUE
+                         LIMIT 1
+                  ) ls ON TRUE
                  WHERE et.event_id=%s
                  ORDER BY et.id
             """, (eid,))
             teams = cur.fetchall()
     else:
-        # список доступных событий waiting / running
+        # список ожидающих и идущих
         cur.execute("""
-            SELECT e.code, e.name, e.type, e.status,
-                   (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams
+            SELECT code, name, description, type, status,
+                   (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams_cnt
               FROM events e
              WHERE e.status IN ('waiting','running')
              ORDER BY e.event_id DESC
         """)
-        active = cur.fetchall()
+        active_events = cur.fetchall()
 
     cur.close(); conn.close()
 
-    return render_template('mod_manage.html',
-                           page_title='Проведение события',
-                           ev=ev, teams=teams,
-                           code_entered=code,
-                           active_events=active)
-
-
+    return render_template(
+        'mod_manage.html',
+        page_title='Проведение события',
+        ev=ev,
+        teams=teams,
+        code_entered=code,
+        active_events=active_events
+    )
 
 # ───────── index ────────────────────────────────────────
 @app.route('/')

@@ -1,88 +1,163 @@
 {% extends 'base.html' %}
 {% block title %}Команды{% endblock %}
+
 {% block content %}
 <h1>Команды</h1>
 
+{# если была ошибка при kick — получаем tid и сразу «открываем» нужную модалку #}
+{% set error_tid = session.pop('kick_error_tid', None) %}
+
 <form style="margin-bottom:12px">
-    <input type="text" name="q" placeholder="Поиск по TID / названию / UID участника"
-           value="{{ q }}" style="padding:6px 8px;width:280px">
-    <button class="btn">Поиск</button>
+  <input type="text" name="q"
+         placeholder="Поиск по TID / названию / UID участника"
+         value="{{ q }}" style="padding:6px 8px;width:280px">
+  <button class="btn">Поиск</button>
 </form>
 
 <div style="display:flex;justify-content:space-between;align-items:center">
-    <h2>Пользователи</h2>
-    <button class="btn btn-outline" onclick="location.reload()">Обновить таблицу</button>
-  </div>
+  <h2>Список команд</h2>
+  <button class="btn btn-outline" onclick="location.reload()">Обновить таблицу</button>
+</div>
 
 <div class="content-box">
-<table class="admin-table">
+  <table class="admin-table">
     <thead>
-        {% set dir_icon = '↑' if order=='asc' else '↓' %}
-        {% macro s(field,label) %}
-           <a href="{{ url_for('admin_teams', q=q, sort=field,
-                               dir='desc' if sort==field and order=='asc' else 'asc') }}">
-              {{ label }}{% if sort==field %} {{ dir_icon }}{% endif %}
-           </a>
-        {% endmacro %}
-        <tr>
-            <th class="col-uid">{{ s('team_id','TID') }}</th>
-            <th class="col-login">{{ s('team_name','Имя команды') }}</th>
-            <th class="col-team">UID участников</th>
-            <th class="col-members">{{ s('members','Количество участников') }}</th>
-            <th class="col-action">Действие</th>
-        </tr>
+      {% set dir_icon = '↑' if order=='asc' else '↓' %}
+      {% macro s(f,l) -%}
+        <a href="{{ url_for('admin_teams', q=q, sort=f,
+                            dir='desc' if sort==f and order=='asc' else 'asc') }}">
+          {{ l }}{% if sort==f %} {{ dir_icon }}{% endif %}
+        </a>
+      {%- endmacro %}
+      <tr>
+        <th>{{ s('team_id','TID') }}</th>
+        <th>{{ s('team_name','Имя команды') }}</th>
+        <th>UID участников</th>
+        <th>{{ s('members','Кол-во участников') }}</th>
+        <th>Действие</th>
+      </tr>
     </thead>
     <tbody>
-    {% for t in teams %}
-        <tr>
-            <td>{{ t[0] }}</td>
-            <td>{{ t[1] }}</td>
-            <td>{{ t[2] if t[2] else '—' }}</td>
-            <td>{{ t[3] }}</td>
-            <td>
-                <div class="action-wrapper">
-                  <a href="#" class="action-btn">Выполнить&nbsp;действие</a>
-                  <div class="action-menu">
-                    <form method="post" action="{{ url_for('admin_team_action') }}">
-                      <input type="hidden" name="tid" value="{{ t[0] }}">
-                      <button name="act" value="delete">Удалить команду</button>
-                      <button name="act" value="disband">Расформировать</button>
-                      <div style="padding:8px">
-                        <input name="kick_uid" placeholder="UID" style="width:70px">
-                        <option value="kick" data-tid="{{ t[0] }}">Исключить участника</option>
-                      </div>
-                    </form>
-                  </div>
-                </div>
-              </td>
-              
-        </tr>
-    {% endfor %}
+      {% for t in teams %}
+      <tr>
+        <td>{{ t[0] }}</td>
+        <td>{{ t[1] }}</td>
+        <td>{{ t[2] or '—' }}</td>
+        <td>{{ t[3] }}</td>
+        <td>
+          <div class="action-wrapper">
+            <a href="#" class="action-btn">Выполнить действие</a>
+            <div class="action-menu">
+              <!-- Удалить / Расформировать -->
+              <button form="delete-{{t[0]}}" name="act" value="delete">
+                Удалить команду
+              </button>
+              <button form="disband-{{t[0]}}" name="act" value="disband">
+                Расформировать
+              </button>
+              <!-- Открыть модалку kick -->
+              <button type="button" data-modal="kickModal{{t[0]}}">
+                Исключить участника
+              </button>
+
+              <!-- скрытые формы для delete/disband -->
+              <form id="delete-{{t[0]}}" method="post"
+                    action="{{ url_for('admin_team_action') }}">
+                <input type="hidden" name="tid" value="{{ t[0] }}">
+              </form>
+              <form id="disband-{{t[0]}}" method="post"
+                    action="{{ url_for('admin_team_action') }}">
+                <input type="hidden" name="tid" value="{{ t[0] }}">
+              </form>
+            </div>
+          </div>
+        </td>
+      </tr>
+
+      <!-- Модалка для дисквалификации -->
+      <div class="modal {% if error_tid and error_tid|int == t[0] %}open{% endif %}"
+           id="kickModal{{t[0]}}">
+        <div class="modal-body">
+          <span class="close">&times;</span>
+          <h3>Исключить участника из «{{ t[1] }}»</h3>
+          <form method="post" action="{{ url_for('admin_team_action') }}">
+            <input type="hidden" name="tid" value="{{ t[0] }}">
+            <input type="hidden" name="act" value="kick">
+
+            <label>UID участника:</label>
+            <input type="text" name="kick_uid" required
+                   style="width:100%;padding:6px 8px;margin:8px 0">
+
+            <!-- сообщение под полем ввода -->
+            <p class="error-msg"
+               style="color:#e05555; margin-top:4px; margin-bottom:12px;
+                      display: {% if error_tid and error_tid|int == t[0] %}block{% else %}none{% endif %};">
+              Неверное значение UID
+            </p>
+
+            <button class="btn" type="submit">Подтвердить</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
     </tbody>
-</table>
+  </table>
 </div>
-<div class="table-pagination">
-{% for p in range(1, pages+1) %}
-   {% if p==page %}<strong>{{ p }}</strong>
-   {% else %}<a href="{{ url_for('admin_teams', page=p, q=q, sort=sort, dir=order) }}">{{ p }}</a>{% endif %}
-{% endfor %}
+
+<div class="table-pagination" style="margin-top:12px">
+  {% for p in range(1, pages+1) %}
+    {% if p == page %}<strong>{{ p }}</strong>
+    {% else %}
+      <a href="{{ url_for('admin_teams',
+                          page=p, q=q, sort=sort, dir=order) }}">{{ p }}</a>
+    {% endif %}
+  {% endfor %}
 </div>
+
+{# Специально вставляем стили и скрипт внутри контента, чтобы работали без изменений base.html #}
+<style>
+  /* Модалка */
+  .modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.55);
+    z-index: 999;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal.open { display: flex; }
+  .modal-body {
+    position: relative;
+    background: #fff;
+    border-radius: 8px;
+    padding: 20px;
+    max-width: 360px;
+    width: 100%;
+    box-shadow: 0 4px 12px rgba(0,0,0,.25);
+  }
+  /* крестик в правом верхнем углу */
+  .modal-body .close {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 24px;
+    cursor: pointer;
+  }
+</style>
 
 <script>
-  document.querySelectorAll('option[value="kick"]').forEach(opt=>{
-  opt.parentElement.addEventListener('change',e=>{
-    if(e.target.value==='kick'){
-      const uid = prompt('UID участника для исключения:');
-      if(uid){
-        const frm = e.target.form;
-        frm.insertAdjacentHTML('beforeend',
-           `<input type="hidden" name="kick_uid" value="${uid}">`);
-        frm.submit();
-      }
-    }
+document.addEventListener('DOMContentLoaded', () => {
+  // скрываем ошибку при закрытии модалки
+  document.querySelectorAll('.modal .close').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const m = btn.closest('.modal');
+      m.classList.remove('open');
+      const err = m.querySelector('.error-msg');
+      if (err) err.style.display = 'none';
+    });
   });
 });
-
 </script>
-
 {% endblock %}
