@@ -8,80 +8,92 @@
   <p>Нужно состоять в команде.</p>
 {% else %}
 
-  {# ───────── форма «Присоединиться по коду» ───────── #}
-  {% if show_join %}
-  <div class="content-box" style="max-width:320px">
-    <h3>Присоединиться по коду</h3>
-    <form method="post">
-      <input name="code" placeholder="Код события" required>
-      <button class="btn" style="margin-top:8px">Присоединиться</button>
-    </form>
-    {% for c,m in get_flashed_messages(with_categories=True) if c=='error' %}
-      <p style="color:#e05555">{{ m }}</p>
-    {% endfor %}
-  </div>
-  {% endif %}
+  {# ---------- если команда уже в событии ---------- #}
+  {% if cur_ev %}
+    <div class="content-box">
+      <h2>{{ cur_ev[1] }}</h2>
+      <p>{{ cur_ev[4] }}</p>
+      <p><strong>Статус:</strong>
+         {{ 'Ожидание' if cur_ev[2]=='waiting' else 'В процессе' }}</p>
 
-  {# ───────── waiting-карточки ───────── #}
-  {% if show_join and waiting %}
-    <h2 style="margin-top:28px">Доступные события</h2>
-    <div class="card-grid">
-      {% for e in waiting %}
-        <div class="card">
-          <h4>{{ e[1] }}</h4>
-          <p>Тип: {{ e[2]|upper }}</p>
-          <p>{{ e[3] }}</p>
-          <p>Команд в очереди: {{ e[4] }}</p>
-          <form method="post">
-            <input type="hidden" name="join_eid" value="{{ e[0] }}">
-            <button class="btn">Участвовать</button>
-          </form>
-        </div>
-      {% endfor %}
-    </div>
-  {% endif %}
-
-  {# ───────── текущее событие ───────── #}
-  {% if current %}
-    <div class="content-box" style="margin-top:32px">
-      <h2>{{ current[1] }} — {{ current[2] }}</h2>
-
-      {% if current[2]=='waiting' %}
+      {% if cur_ev[2]=='waiting' %}
         <p>Ожидание других команд…</p>
-
-      {% elif current[2]=='running' %}
-        <p><a href="{{ url_for('static', filename=current[6]) }}" target="_blank">
-           📄 Скачать задание</a></p>
-
-        <form method="post" action="{{ url_for('submit_answer', eid=current[0]) }}">
-          <label>Ответ</label>
-          <input name="answer" required>
-          <button class="btn">Отправить</button>
-        </form>
-
-      {% if lb %}
-        <h3 style="margin-top:24px">Leaderboard</h3>
-        {% include '_lb.html' %}
       {% endif %}
 
-      {% elif current[2]=='finished' %}
-        <h3>Итоги</h3>
-        {% if lb %}{% include '_lb.html' %}{% endif %}
+      {% if cur_ev[2]=='running' %}
+        {% if cur_ev[5] %}
+          <p style="margin-top:8px">
+            <a href="{{ url_for('static', filename=cur_ev[5]) }}" class="btn" download>
+              Скачать&nbsp;задание&nbsp;(PDF)
+            </a>
+          </p>
+
+          <form method="post" action="{{ url_for('submit_answer', eid=cur_ev[0]) }}"
+                style="margin-top:14px">
+            <input name="answer" placeholder="Ответ"
+                   style="padding:6px 8px;width:240px" required>
+            <button class="btn">Отправить</button>
+          </form>
+        {% endif %}
+
+        <h3 style="margin:22px 0 8px">Лидерборд</h3>
+        <table class="admin-table small">
+          <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
+          <tbody>
+          {% for row in leaderboard %}
+            <tr {% if loop.first %}style="background:#e1f7ee"{% endif %}>
+              <td>{{ row[0] }}</td><td>{{ row[1] }}</td><td>{{ row[2] }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
       {% endif %}
     </div>
-  {% endif %}
 
-  {% if not current and not waiting %}
-    <p style="margin-top:24px">Нет активных событий.</p>
+  {% else %}
+    {# ---------- форма «присоединиться по коду» ---------- #}
+    <div class="content-box" style="max-width:420px">
+      <h3>Присоединиться по&nbsp;коду</h3>
+      <form method="post">
+        <input name="code" placeholder="Код события"
+               style="padding:6px 8px;width:220px" maxlength="16" required>
+        <button class="btn">Присоединиться</button>
+      </form>
+    </div>
+
+    {# ---------- доступные waiting-события ---------- #}
+    {% if waiting %}
+      <h3 style="margin-top:28px">Доступные события</h3>
+      <div class="card-grid">
+        {% for w in waiting %}
+          <div class="card">
+            <h4>{{ w[1] }}</h4>
+            <p>Тип: {{ w[2]|upper }}</p>
+            <p>{{ w[3] }}</p>
+            <p>Команд в очереди: {{ w[4] }}</p>
+
+            <form method="post">
+              <input type="hidden" name="join_event" value="{{ w[0] }}">
+              <button class="btn">Участвовать</button>
+            </form>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p style="margin-top:20px">Нет активных событий.</p>
+    {% endif %}
   {% endif %}
 {% endif %}
+{% endblock %}
 
 <style>
-.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-top:12px}
+.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:12px}
 .card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
 .card h4{margin:0 0 6px 0}
-.admin-table{border-collapse:collapse;width:100%;margin-top:8px}
+.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+.admin-table{border-collapse:collapse;width:100%}
+.admin-table.small td,.admin-table.small th{padding:4px 6px}
 .admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
 .admin-table thead{background:#f0f6fa;font-weight:600}
 </style>
-{% endblock %}

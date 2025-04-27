@@ -1,92 +1,115 @@
 {% extends 'base.html' %}
 {% block title %}Команда{% endblock %}
+
 {% block content %}
 <h1>Команда</h1>
 
 {% if not team %}
-  <!-- формы создания / присоединения (как было) -->
-  <div class="content-box" style="max-width:380px">
-    <h3>Создать команду</h3>
-    <form method="post" action="{{ url_for('create_team') }}">
-      <label>Название (≥3 символа)</label>
-      <input name="team_name" required>
-      <label>Код приглашения (необязательно)</label>
-      <input name="invite_code">
-      {% for c,m in get_flashed_messages(with_categories=True) if c=='modal-create-error' %}
-        <p style="color:#ff7070">{{ m }}</p>{% endfor %}
+  <!-- ─── ЕСЛИ БЕЗ КОМАНДЫ ───────────────────────────── -->
+  <div class="content-box" style="max-width:420px">
+
+    <!-- создать команду -->
+    <h3>Создать&nbsp;команду</h3>
+    <form method="post" action="{{ url_for('create_team') }}" style="margin-bottom:18px">
+      <input name="team_name" placeholder="Название (≥3 символов)" required
+             style="padding:6px 8px;width:100%;margin-bottom:6px">
+      <input name="invite_code" placeholder="Код-приглашение (необязательно)"
+             style="padding:6px 8px;width:100%;margin-bottom:10px">
       <button class="btn">Создать</button>
     </form>
-  </div>
 
-  <div class="content-box" style="max-width:380px">
-    <h3>Присоединиться к команде</h3>
+    <hr style="margin:18px 0">
+
+    <!-- присоединиться -->
+    <h3>Присоединиться&nbsp;к&nbsp;команде</h3>
     <form method="post" action="{{ url_for('join_team') }}">
-      <label>Код приглашения</label>
-      <input name="invite_code" required>
-      {% for c,m in get_flashed_messages(with_categories=True) if c=='modal-join-error' %}
-        <p style="color:#ff7070">{{ m }}</p>{% endfor %}
-      <button class="btn">Присоединиться</button>
+      <input name="invite_code" placeholder="Код&nbsp;команды"
+             style="padding:6px 8px;width:100%;margin-bottom:10px" required>
+      <button class="btn btn-outline">Присоединиться</button>
     </form>
   </div>
 
 {% else %}
-  <!-- информация о команде -->
+  <!-- ─── УЧАСТНИКИ + кнопка «Покинуть команду» ───────── -->
   <div class="content-box">
     <h2>{{ team.team_name }}</h2>
-    <p>ID: {{ team.team_id }}</p>
-    <form method="post" action="{{ url_for('leave_team') }}">
-      <button class="btn btn-outline" onclick="return confirm('Покинуть команду?')">
-        Покинуть команду
+    {% if team.description %}<p>{{ team.description }}</p>{% endif %}
+
+    <h3>Участники</h3>
+    <ul>
+      {% for m in members %}
+        <li{% if m.is_blocked %} style="color:#e05555"{% endif %}>
+          {{ m.username }}
+        </li>
+      {% endfor %}
+    </ul>
+
+    <form method="post" action="{{ url_for('leave_team') }}"
+          onsubmit="return confirm('Вы уверены, что хотите покинуть команду?');"
+          style="margin-top:14px">
+      <button class="btn btn-outline" style="background:#e05555;color:#fff">
+        Покинуть&nbsp;команду
       </button>
     </form>
   </div>
 
-  <!-- участники -->
-  <div class="content-box" style="margin-top:20px;max-width:360px">
-    <h3>Участники</h3>
-    <ul>
-      {% for m in members %}
-        <li>{{ m.username }} (UID {{ m.user_id }})</li>
-      {% endfor %}
-    </ul>
-  </div>
-
-  <!-- статистика -->
-  <div class="content-box" style="margin-top:20px;max-width:360px">
-    <h3>Статистика игрока</h3>
+  <!-- ─── СТАТИСТИКА ───────── -->
+  <div class="content-box" style="margin-top:18px">
+    <h3>Статистика&nbsp;команды</h3>
     <p>Событий: <strong>{{ stats.total }}</strong></p>
-    <p>Побед : <strong>{{ stats.wins }}</strong></p>
+    <p>Побед:   <strong>{{ stats.wins }}</strong></p>
   </div>
 
-  <!-- история -->
-  <div class="content-box" style="margin-top:20px">
-    <h3>История событий</h3>
+  <!-- ─── ИСТОРИЯ ──────────── -->
+  <div class="content-box" style="margin-top:26px">
+    <h3>История&nbsp;событий</h3>
+
     {% if history %}
-      <table class="admin-table">
-        <thead><tr><th>Дата</th><th>Событие</th><th>Моя команда</th><th>Победитель</th></tr></thead>
+      <table class="admin-table small">
+        <thead>
+          <tr>
+            <th>Название</th><th>Дата</th>
+            <th>Счёт&nbsp;команды</th><th>Победитель</th>
+          </tr>
+        </thead>
         <tbody>
         {% for h in history %}
           <tr>
-            <td>{{ h.date.strftime('%d.%m.%Y') }}</td>
             <td>{{ h.name }}</td>
-            <td>{{ h.my_team }}</td>
+            <td>{{ h.date }}</td>
+            <td>{{ h.my_pts }}</td>
             <td>{{ h.winner }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
 
-      {% if pages>1 %}
-        <div style="margin-top:8px">
-          {% for p in range(1,pages+1) %}
-            {% if p==page %}<strong>{{ p }}</strong>
-            {% else %}<a href="{{ url_for('team', page=p) }}">{{ p }}</a>{% endif %}
-          {% endfor %}
-        </div>
-      {% endif %}
+      <!-- пагинация -->
+      <div class="table-pagination" style="text-align:right">
+        {% for p in range(1, pages+1) %}
+          {% if p == page %}
+            <strong>{{ p }}</strong>
+          {% else %}
+            <a href="{{ url_for('team', page=p) }}">{{ p }}</a>
+          {% endif %}
+        {% endfor %}
+      </div>
     {% else %}
-      <p>Ещё нет завершённых событий.</p>
+      <p>Завершённых событий пока нет.</p>
     {% endif %}
   </div>
 {% endif %}
 {% endblock %}
+
+<style>
+.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;
+             box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.admin-table{border-collapse:collapse;width:100%}
+.admin-table.small th,.admin-table.small td{padding:4px 6px}
+.admin-table th,.admin-table td{border:1px solid #d4dee4;text-align:center}
+.admin-table thead{background:#f0f6fa;font-weight:600}
+.table-pagination a,strong{margin-left:4px}
+
+.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+.btn.btn-outline{background:#fff;color:#0084c6;border:1px solid #0084c6}
+</style>

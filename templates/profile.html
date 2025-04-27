@@ -5,14 +5,10 @@
 <h1>Профиль</h1>
 
 {# ─── роль ─── #}
-{% set role_color = {'player':'#3cb371','moderator':'#8a2be2','admin':'#e05555'} %}
-<p style="color:{{ role_color[role] }};margin-bottom:4px">
-  {% if role == 'player' %}Участник соревнований{% elif role == 'moderator' %}
-     Модератор{% else %}Администратор{% endif %}
-</p>
-
-{# ─── имя ─── #}
-<h2 style="margin-top:0">{{ username }}</h2>
+<h2>
+  <span class="role {{ role }}">{{ role_ru }}</span>
+  {{ username }}
+</h2>
 
 {# ─── статус ─── #}
 <p>
@@ -63,4 +59,13 @@
     <button class="btn btn-danger">Удалить</button>
   </form>
 </div>
+
+<style>
+  .role{padding:2px 6px;border-radius:4px;font-size:90%}
+  .role.player{background:#29c97d;color:#fff}
+  .role.moderator{background:#9b59e0;color:#fff}
+  .role.admin{background:#e05555;color:#fff}
+  </style>
+  
+  
 {% endblock %}

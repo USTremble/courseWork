@@ -2,121 +2,187 @@
 {% block title %}Проведение события{% endblock %}
 
 {% block content %}
-<h1>Проведение события</h1>
+<h1>Проведение&nbsp;события</h1>
 
-{# ─── панель модератора (waiting + running) ─── #}
-{% if not ev %}
-  <form method="get" class="content-box" style="max-width:340px">
-    <label>Код события</label>
-    <input name="code" value="{{ code_entered }}" required>
-    <button class="btn" style="margin-top:6px">Открыть</button>
-  </form>
-
-  {% if wait_cards %}
-    <h2 style="margin-top:28px">Ожидающие / Идут</h2>
-    <div class="card-grid">
-      {% for w in wait_cards %}
-        <div class="card">
-          <h4>{{ w[2] }}</h4>
-          <p>{{ w[4] }}</p>
-          <p>Тип: {{ w[3]|upper }}</p>
-          <p>Статус: {{ w[6] }}</p>
-          <p>Команд: {{ w[5] }}</p>
-          <form method="get">
-            <input type="hidden" name="code" value="{{ w[1] }}">
-            <button class="btn">Провести событие</button>
-          </form>
-        </div>
-      {% endfor %}
+{# ───── карточки waiting / running ───── #}
+{% if not ev and active_events %}
+  <h2 style="margin-bottom:10px">Доступные события</h2>
+  <div class="cards">
+  {% for c in active_events %}
+    <div class="card">
+      <h3>{{ c[1] }}</h3>
+      <p>Тип: {{ c[2]|upper }}</p>
+      <p>Статус: {{ c[3] }}</p>
+      <p>Команд: {{ c[4] }}</p>
+      <a href="{{ url_for('mod_manage', code=c[0]) }}" class="btn btn-small">
+        Провести&nbsp;событие
+      </a>
     </div>
-  {% endif %}
+  {% endfor %}
+  </div>
+  <hr style="margin:24px 0">
 {% endif %}
 
-{# ─── управление выбранным событием ─── #}
-{% if ev %}
-  <div class="content-box" style="margin-top:24px">
-    <div style="display:flex;justify-content:space-between;align-items:center">
-      <h2 style="margin:0">{{ ev[1] }} <small>({{ ev[2] }})</small></h2>
-      <a href="{{ url_for('mod_manage', close=1) }}"
-         style="font-size:22px;text-decoration:none">&#10005;</a>
+{# ───── ввод кода ───── #}
+{% if not ev %}
+  <form class="code-form" method="get">
+    <input name="code" maxlength="16" placeholder="Код события"
+           value="{{ code_entered }}">
+    <button class="btn">Найти</button>
+  </form>
+{% else %}
+  <div class="content-box">
+
+    {# ───── заголовок + кнопки справа ───── #}
+    <div class="head-bar">
+      <h2>{{ ev[1] }} ({{ ev[2] }})</h2>
+
+      <div class="head-actions">
+        <form method="post">
+          <input type="hidden" name="code" value="{{ code_entered }}">
+          {% if ev[2]=='waiting' %}
+            <button name="start" class="btn btn-small">Начать</button>
+          {% elif ev[2]!='finished' %}
+            <button name="finish" class="btn btn-small btn-outline"
+                    onclick="return confirm('Завершить событие?');">
+              Завершить
+            </button>
+          {% endif %}
+        </form>
+
+        <button class="btn btn-small btn-outline"
+                onclick="location.reload()">Обновить</button>
+
+        <a href="{{ url_for('mod_manage') }}" class="close-btn">✕</a>
+      </div>
     </div>
 
-    <div style="margin:16px 0">
-      {% if ev[2]=='waiting' %}
-        <form method="post" style="display:inline">
-          <input type="hidden" name="code" value="{{ code_entered }}">
-          <button name="start" class="btn">Начать событие</button>
-        </form>
-      {% elif ev[2]!='finished' %}
-        <form method="post" style="display:inline">
-          <input type="hidden" name="code" value="{{ code_entered }}">
-          <button name="finish" class="btn">Завершить событие</button>
-        </form>
-      {% endif %}
-    </div>
-
-    <table class="admin-table">
+    {# ───── таблица команд ───── #}
+    <table class="admin-table small" style="margin-top:16px">
       <thead>
-        <tr>
-          <th>#</th><th>Команда</th><th>Очки</th>
-          <th>Последний ответ / время</th>
-          {% if ev[2] != 'finished' %}<th>Действие</th>{% endif %}
-        </tr>
+        <tr><th>#</th><th>Команда</th><th>Очки</th>
+            <th>Последний&nbsp;ответ</th><th>Действие</th></tr>
       </thead>
       <tbody>
-      {% for t in teams %}
-        <tr>
-          <td>{{ loop.index }}</td>
-          <td style="text-align:left">{{ t[1] }}</td>
-          <td>{{ t[2] }}</td>
-          <td style="text-align:left">{{ t[3] }}&nbsp;<small>{{ t[4] }}</small></td>
-
-          {% if ev[2] != 'finished' %}
-          <td>
-            <select onchange="doAct(this, '{{ t[0] }}')">
-              <option selected disabled>⋮</option>
-              <option value="+1">+ очко</option>
-              <option value="-1">− очко</option>
-              <option value="dq">Дисквалифицировать</option>
-            </select>
-          </td>
-          {% endif %}
-        </tr>
-      {% endfor %}
+      {% if teams %}
+        {% for t in teams %}
+          <tr>
+            <td>{{ loop.index }}</td>
+            <td>{{ t[1] }}</td>
+            <td>{{ t[2] }}</td>
+            <td>
+              {% if t[3] %}
+                <div><code>{{ t[3] }}</code></div><small>{{ t[4] }}</small>
+              {% else %}—{% endif %}
+            </td>
+            <td>
+            {% if ev[2]!='finished' %}
+              <div class="action-wrapper">
+                <span class="action-btn">Выполнить&nbsp;действие ▾</span>
+                <div class="action-menu">
+                  <a href="#" onclick="openDelta('{{ t[0] }}',1);return false;">Добавить очки</a>
+                  <a href="#" onclick="openDelta('{{ t[0] }}',-1);return false;">Убрать очки</a>
+                  <form method="post">
+                    <input type="hidden" name="code" value="{{ code_entered }}">
+                    <input type="hidden" name="tid"  value="{{ t[0] }}">
+                    <button name="dq" value="1"
+                            onclick="return confirm('Дисквалифицировать {{t[1]}}?');">
+                      Дисквалифицировать
+                    </button>
+                  </form>
+                </div>
+              </div>
+            {% else %}—{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      {% else %}
+        <tr><td colspan="5" style="padding:10px 0">Команд пока нет</td></tr>
+      {% endif %}
       </tbody>
     </table>
   </div>
-
-  <form id="actFrm" method="post" style="display:none">
-    <input type="hidden" name="tid">
-    <input type="hidden" name="delta">
-    <input type="hidden" name="code" value="{{ code_entered }}">
-  </form>
 {% endif %}
 {% endblock %}
 
-{# ─── стили и JS ─── #}
-<style>
-.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px;margin-top:16px}
-.card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
-.admin-table{border-collapse:collapse;width:100%;margin-top:8px}
-.admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
-.admin-table thead{background:#f0f6fa;font-weight:600}
-</style>
-
+<!-- ===== delta-dialog ===== -->
 <script>
-function doAct(sel, tid){
-  const v = sel.value;
-  sel.selectedIndex = 0;                      // сброс селекта
-  if(!v) return;
+function openDelta(tid, sign){
+  const dlg=document.createElement('div');
+  dlg.className='delta-bg';
+  dlg.innerHTML=`<div class="delta-box">
+      <form>
+        <label>${sign>0?'Добавить':'Убрать'} очки (1-10):</label>
+        <input type="number" min="1" max="10" required>
+        <div class="d-btns">
+          <button type="submit">OK</button>
+          <button type="button">Отмена</button>
+        </div>
+      </form>
+    </div>`;
+  document.body.appendChild(dlg);
 
-  if(v==='dq' && !confirm('Дисквалифицировать команду?')) return;
-
-  const frm = document.getElementById('actFrm');
-  frm.tid.value = tid;
-  frm.delta.value = (v==='dq' ? -255 : v);
-  frm.submit();
+  dlg.querySelector('button[type="button"]').onclick=()=>dlg.remove();
+  dlg.querySelector('form').onsubmit=e=>{
+    e.preventDefault();
+    const n=parseInt(e.target[0].value);
+    if(n<1||n>10)return;
+    const f=document.createElement('form');
+    f.method='post';
+    f.innerHTML=`<input type="hidden" name="code" value="{{ code_entered }}">
+                 <input type="hidden" name="tid"  value="${tid}">
+                 <input type="hidden" name="delta" value="${sign*n}">`;
+    document.body.appendChild(f);f.submit();
+  };
 }
 </script>
+
+<style>
+/* ---------- layout ---------- */
+.cards{display:flex;flex-wrap:wrap;gap:16px}
+.card{border:1px solid #c7d9e1;border-radius:8px;padding:14px 18px;width:200px;
+      box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.card h3{margin:0 0 6px;font-size:18px}
+.card p{margin:2px 0;font-size:14px}
+
+.code-form input{padding:6px 8px;width:180px;margin-right:6px}
+
+.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;
+             box-shadow:0 2px 6px rgba(0,0,0,.06);margin-top:18px}
+
+.head-bar{position:relative;padding-right:200px}
+.head-bar h2{margin:0;font-size:20px}
+.head-actions{position:absolute;top:0;right:0;display:flex;gap:8px;align-items:center}
+.close-btn{font-size:20px;color:#666;text-decoration:none;padding:0 4px}
+
+.admin-table{border-collapse:collapse;width:100%}
+.admin-table.small th,.admin-table.small td{padding:4px 6px}
+.admin-table th,.admin-table td{border:1px solid #d4dee4;text-align:center}
+.admin-table thead{background:#f0f6fa;font-weight:600}
+
+/* ---------- action menu ---------- */
+.action-wrapper{position:relative;display:inline-block}
+.action-btn{cursor:pointer;text-decoration:underline;color:#0084c6;font-size:14px}
+.action-menu{display:none;position:absolute;right:0;top:22px;background:#fff;
+             border:1px solid #c7d9e1;border-radius:6px;
+             box-shadow:0 2px 6px rgba(0,0,0,.15);min-width:170px;z-index:20}
+.action-menu a,.action-menu button{display:block;width:100%;border:none;background:none;
+                                   text-align:left;padding:8px 12px;font-size:14px;cursor:pointer}
+.action-menu a:hover,.action-menu button:hover{background:#f0f6fa}
+.action-wrapper:hover .action-menu{display:block}
+
+/* ---------- delta modal ---------- */
+.delta-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);
+          display:flex;justify-content:center;align-items:center;z-index:30}
+.delta-box{background:#fff;padding:18px 24px;border-radius:8px;
+           box-shadow:0 4px 12px rgba(0,0,0,.25);width:260px}
+.delta-box label{display:block;margin-bottom:6px}
+.delta-box input{width:80px;padding:4px 6px;margin-bottom:12px}
+.d-btns{text-align:right}
+.d-btns button{margin-left:8px;padding:4px 10px}
+
+/* ---------- buttons ---------- */
+.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+.btn.btn-outline{background:#fff;color:#0084c6;border:1px solid #0084c6}
+.btn.btn-small{padding:4px 10px;font-size:14px}
+</style>

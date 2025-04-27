@@ -234,32 +234,59 @@ def paginated(sql_count, sql_rows, params, page):
 @app.route('/admin/users')
 @admin_required
 def admin_users():
-    page=max(int(request.args.get('page',1)),1); q=request.args.get('q','').strip()
-    sort=request.args.get('sort','user_id'); order=request.args.get('dir','asc')
-    if sort not in {'user_id','username','role'}: sort='user_id'
-    dir_sql='ASC' if order=='asc' else 'DESC'
+    page  = max(int(request.args.get('page', 1)), 1)
+    q     = request.args.get('q', '').strip()
+    sort  = request.args.get('sort', 'user_id')
+    order = request.args.get('dir',  'asc')
 
-    base_from="""FROM users u
-                 LEFT JOIN team_members tm ON tm.user_id=u.user_id
-                 LEFT JOIN teams t ON t.team_id=tm.team_id"""
-    where=''; params=[]
+    # ――― разрешённые поля сортировки ―――
+    allowed = {'user_id', 'username', 'role', 'is_blocked'}
+    if sort not in allowed:
+        sort = 'user_id'
+    dir_sql = 'ASC' if order == 'asc' else 'DESC'
+
+    base_from = """
+        FROM users u
+        LEFT JOIN team_members tm ON tm.user_id = u.user_id AND tm.active
+        LEFT JOIN teams t         ON t.team_id  = tm.team_id
+    """
+
+    where, params = '', []
     if q:
-        where=("WHERE CAST(u.user_id AS TEXT) ILIKE %s OR u.username ILIKE %s OR t.team_name ILIKE %s")
-        params=[f'%{q}%']*3
+        where = """WHERE CAST(u.user_id AS TEXT) ILIKE %s
+                      OR u.username ILIKE %s
+                      OR CAST(t.team_id AS TEXT) ILIKE %s"""
+        params = [f'%{q}%'] * 3
 
     sql_count = f"SELECT COUNT(DISTINCT u.user_id) {base_from} {where}"
-    sql_rows  = f"""SELECT u.user_id,u.username,
-                           COALESCE(string_agg(t.team_name||' ('||t.team_id||')',', '),'—') AS teams,
-                           u.role
-                    {base_from} {where}
-                    GROUP BY u.user_id
-                    ORDER BY {sort} {dir_sql}
-                    LIMIT %s OFFSET %s"""
 
-    users,pages,_=paginated(sql_count,sql_rows,params,page)
-    return render_template('admin_users.html',page_title='Пользователи',
-                           users=users,page=page,pages=pages,q=q,
-                           sort=sort,order=order)
+    sql_rows = f"""
+        SELECT u.user_id,
+               u.username,
+               COALESCE(t.team_name||' ('||t.team_id||')','—') AS team,
+               u.role,
+               u.is_blocked
+          {base_from} {where}
+         GROUP BY u.user_id, u.username, u.role, u.is_blocked, t.team_name, t.team_id
+         ORDER BY {sort} {dir_sql}, u.user_id
+         LIMIT %s OFFSET %s
+    """
+
+    PER_PAGE     = 10
+    params_rows  = params + [PER_PAGE, (page-1)*PER_PAGE]
+
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute(sql_count, params);      total  = cur.fetchone()[0]
+    cur.execute(sql_rows , params_rows); users  = cur.fetchall()
+    cur.close(); conn.close()
+
+    pages = (total + PER_PAGE - 1) // PER_PAGE
+    return render_template('admin_users.html',
+                           page_title='Пользователи',
+                           users=users, q=q,
+                           page=page, pages=pages,
+                           sort=sort, order=order)
+
 
 @app.route('/admin/teams')
 @admin_required

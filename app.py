@@ -135,53 +135,35 @@ def logout():
     return redirect(url_for('index'))
 
 # ───────── главная ─────────────────────────────────────────
+# ─── dashboard (15 событий) ───
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    """главная после авторизации: текст + 15 последних завершённых событий"""
-    conn = get_db_connection(); cur = conn.cursor()
-
-    # 15 последних finished-событий
+    conn=get_db_connection(); cur=conn.cursor()
     cur.execute("""
-        SELECT e.event_id,
-               e.name, e.type, e.description,
-               t.team_name               AS winner,
-               u.username                AS host
+        SELECT e.event_id,e.name,e.type,e.description,
+               t.team_name,u.username
           FROM events e
-          JOIN event_teams et ON et.event_id = e.event_id
-          JOIN teams t        ON t.team_id   = et.team_id
-          JOIN users u        ON u.user_id   = e.created_by
-         WHERE e.status = 'finished'
-           AND et.points = (SELECT MAX(points)
-                               FROM event_teams
-                              WHERE event_id = e.event_id)
-         GROUP BY e.event_id, t.team_name, u.username
-         ORDER BY e.event_id DESC
-         LIMIT 15
+          JOIN event_teams et ON et.event_id=e.event_id
+          JOIN teams t        ON t.team_id = et.team_id
+          JOIN users u        ON u.user_id = e.created_by
+         WHERE e.status='finished'
+           AND et.points=(SELECT MAX(points) FROM event_teams
+                           WHERE event_id=e.event_id)
+         GROUP BY e.event_id,t.team_name,u.username
+         ORDER BY e.event_id DESC LIMIT 15
     """)
-    finished = []
-    for row in cur.fetchall():
-        # лидерборд каждой карточки
-        cur.execute("""
-            SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
-                   t.team_name, et.points
-              FROM event_teams et JOIN teams t USING(team_id)
-             WHERE et.event_id=%s
-             ORDER BY et.points DESC
-        """, (row[0],))
-        finished.append({
-            'name'      : row[1],
-            'type'      : row[2],
-            'description': row[3],
-            'winner'    : row[4],
-            'host'      : row[5],
-            'lb'        : cur.fetchall()
-        })
+    finished=[]
+    for r in cur.fetchall():
+        cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC),
+                              t.team_name,et.points
+                         FROM event_teams et JOIN teams t USING(team_id)
+                        WHERE et.event_id=%s
+                        ORDER BY et.points DESC""",(r[0],))
+        finished.append({'name':r[1],'type':r[2],'description':r[3],
+                         'winner':r[4],'host':r[5],'lb':cur.fetchall()})
     cur.close(); conn.close()
-
-    return render_template('dashboard.html',
-                           page_title='Главная',
-                           finished=finished)
+    return render_template('dashboard.html', page_title='Главная', finished=finished)
 
 # ─────────────────────────── user_stats ───────────────────────────
 def user_stats(uid: int) -> dict:
@@ -225,30 +207,43 @@ def user_stats(uid: int) -> dict:
     return {'total': total, 'wins': wins}
 
 # ───────── профиль ─────────
+# ───────── профиль ─────────
 @app.route('/profile')
 @login_required
 def profile():
     """
-    Показывает сведения об учётной записи:
-    • имя, роль, статус (активен / заблокирован)
-    • ссылку на текущую команду (если есть)
-    • формы смены пароля и удаления аккаунта
+    Страница профиля:
+      • имя, роль, статус (активен / заблокирован)
+      • ссылка на текущую команду
+      • формы смены пароля и удаления аккаунта
     """
     username = session.get('username')
-    role     = session.get('role')         # player / moderator / admin
+    role     = session.get('role')                 # player / moderator / admin
     blocked  = session.get('is_blocked', False)
 
-    team, _ = current_team()               # None, [] если не в команде
+    role_ru = {
+        'player'    : 'Участник',
+        'moderator' : 'Модератор',
+        'admin'     : 'Администратор'
+    }
 
-    return render_template('profile.html',
-                           page_title='Профиль',
-                           username=username,
-                           role=role,
-                           is_blocked=blocked,
-                           team=team,
-                           pass_msg=request.args.get('pm'),
-                           pass_ok=request.args.get('ok') == '1')
+    team, _ = current_team()                       # None, []  если не в команде
 
+    return render_template(
+        'profile.html',
+        page_title = 'Профиль',
+
+        # данные для шаблона
+        username   = username,
+        role       = role,                         # css-класс: player|moderator|admin
+        role_ru    = role_ru.get(role, ''),
+        is_blocked = blocked,
+        team       = team,
+
+        # сообщения смены пароля / удаления
+        pass_msg = request.args.get('pm'),
+        pass_ok  = request.args.get('ok') == '1'
+    )
 
 
 
@@ -281,14 +276,23 @@ def delete_account():
     return redirect(url_for('profile', pm='Пароль неверен', ok='0'))
 
 # ───────── команды игрока ─────────────────────────────────
+# ───────── команды игрока ─────────────────────────────────────────
 def current_team():
+    """
+    Возвращает (team_dict, members_list)
+
+    team_dict = {'team_id': .., 'team_name': .., 'description': ..}
+    members   = [{'user_id':..,'username':..,'is_blocked':True/False}, …]
+
+    Если игрок не в команде → (None, [])
+    """
     conn = get_db_connection(); cur = conn.cursor()
 
     cur.execute("""
-        SELECT t.team_id, t.team_name, t.description
+        SELECT t.team_id,t.team_name,t.description
           FROM teams t
           JOIN team_members tm ON t.team_id = tm.team_id
-         WHERE tm.user_id=%s AND tm.active = TRUE
+         WHERE tm.user_id = %s AND tm.active
     """, (session['user_id'],))
     row = cur.fetchone()
 
@@ -297,43 +301,104 @@ def current_team():
         return None, []
 
     cur.execute("""
-        SELECT u.user_id, u.username
+        SELECT u.user_id,u.username,u.is_blocked
           FROM users u
-          JOIN team_members tm ON u.user_id = tm.user_id
-         WHERE tm.team_id = %s AND tm.active = TRUE
+          JOIN team_members tm ON tm.user_id = u.user_id
+         WHERE tm.team_id = %s AND tm.active
     """, (row[0],))
-    members = [{'user_id': r[0], 'username': r[1]} for r in cur.fetchall()]
+    members = [{'user_id':r[0],'username':r[1],'is_blocked':r[2]} for r in cur.fetchall()]
 
     cur.close(); conn.close()
-    return {'team_id': row[0], 'team_name': row[1], 'description': row[2]}, members
+    return {'team_id':row[0],'team_name':row[1],'description':row[2]}, members
 
+# ─────────────────────── /team ────────────────────────────────
 @app.route('/team')
 @login_required
 def team():
-    ti, members = current_team()
-    # формы «создать / присоединиться» остаются прежними — показываем их,
-    # если команды нет
-    if not ti:
-        return render_template('team.html',
-                               page_title='Команда',
-                               team=None, members=[])
-
-    # ─── статистика и история ───
-    uid   = session['user_id']
+    """
+    • без команды  → формы «Создать / Присоединиться»;
+    • с командой   → участники, статистика, история (15 строк на страницу).
+    """
+    team, members = current_team()                # (None, []) если не в команде
     page  = max(int(request.args.get('page', 1)), 1)
-    off   = (page - 1) * EVENTS_PER_PAGE
+    PER   = 15
+    off   = (page - 1) * PER
 
-    conn  = get_db_connection(); cur = conn.cursor()
-    stats = user_stats(uid)
-    history, total = fetch_history(cur, uid, EVENTS_PER_PAGE, off)
-    cur.close(); conn.close()
-    pages = (total + EVENTS_PER_PAGE - 1)//EVENTS_PER_PAGE
+    stats   = {'total': 0, 'wins': 0}
+    history = []
+    pages   = 0
+
+    if team:
+        conn = get_db_connection(); cur = conn.cursor()
+
+        # ---------- статистика ----------
+        cur.execute("""
+            SELECT COUNT(DISTINCT e.event_id)
+              FROM events e
+              JOIN event_teams et USING(event_id)
+             WHERE et.team_id=%s
+               AND e.status='finished'""",
+            (team['team_id'],))
+        stats['total'] = cur.fetchone()[0]
+
+        cur.execute("""
+            SELECT COUNT(*)
+              FROM events e
+             WHERE e.status='finished'
+               AND (SELECT MAX(points) FROM event_teams
+                     WHERE event_id=e.event_id) =
+                   (SELECT points FROM event_teams
+                     WHERE event_id=e.event_id AND team_id=%s)""",
+            (team['team_id'],))
+        stats['wins'] = cur.fetchone()[0]
+
+        # ---------- сколько всего строк ----------
+        cur.execute("""
+            SELECT COUNT(*)
+              FROM events e
+              JOIN event_teams et USING(event_id)
+             WHERE et.team_id=%s
+               AND e.status='finished'""",
+            (team['team_id'],))
+        total = cur.fetchone()[0]
+        pages = (total + PER - 1) // PER
+
+        # ---------- история ----------
+        cur.execute("""
+            SELECT e.name,
+                   TO_CHAR(NOW()::date, 'DD.MM.YYYY')       AS dt,
+                   et.points,
+                   (SELECT t2.team_name
+                      FROM event_teams et2
+                      JOIN teams t2 USING(team_id)
+                     WHERE et2.event_id = e.event_id
+                     ORDER BY et2.points DESC
+                     LIMIT 1)                               AS winner
+              FROM events e
+              JOIN event_teams et USING(event_id)
+             WHERE et.team_id = %s
+               AND e.status  = 'finished'
+             ORDER BY e.event_id DESC
+             LIMIT %s OFFSET %s""",
+            (team['team_id'], PER, off))
+
+        history = [{'name'  : r[0],
+                    'date'  : r[1],          # строка «дд.мм.гггг»
+                    'my_pts': r[2],
+                    'winner': r[3]} for r in cur.fetchall()]
+        cur.close(); conn.close()
 
     return render_template('team.html',
                            page_title='Команда',
-                           team=ti, members=members,
-                           stats=stats, history=history,
-                           page=page, pages=pages)
+                           team=team,
+                           members=members,
+                           stats=stats,
+                           history=history,
+                           page=page,
+                           pages=pages)
+
+
+
 
 # ───────── история игрока (по событиям) ─────────
 def fetch_history(cur, uid: int, limit: int, off: int):
@@ -501,33 +566,60 @@ def paginated(sql_count, sql_rows, params, page):
 @app.route('/admin/users')
 @admin_required
 def admin_users():
-    page=max(int(request.args.get('page',1)),1); q=request.args.get('q','').strip()
-    sort=request.args.get('sort','user_id'); order=request.args.get('dir','asc')
-    if sort not in {'user_id','username','role'}: sort='user_id'
-    dir_sql='ASC' if order=='asc' else 'DESC'
+    page  = max(int(request.args.get('page', 1)), 1)
+    q     = request.args.get('q', '').strip()
+    sort  = request.args.get('sort', 'user_id')
+    order = request.args.get('dir',  'asc')
 
-    base_from="""FROM users u
-                 LEFT JOIN team_members tm ON tm.user_id=u.user_id
-                 LEFT JOIN teams t ON t.team_id=tm.team_id"""
-    where=''; params=[]
+    # ――― разрешённые поля сортировки ―――
+    allowed = {'user_id', 'username', 'role', 'is_blocked'}
+    if sort not in allowed:
+        sort = 'user_id'
+    dir_sql = 'ASC' if order == 'asc' else 'DESC'
+
+    base_from = """
+        FROM users u
+        LEFT JOIN team_members tm ON tm.user_id = u.user_id AND tm.active
+        LEFT JOIN teams t         ON t.team_id  = tm.team_id
+    """
+
+    where, params = '', []
     if q:
-        where=("WHERE CAST(u.user_id AS TEXT) ILIKE %s OR u.username ILIKE %s OR t.team_name ILIKE %s")
-        params=[f'%{q}%']*3
+        where = """WHERE CAST(u.user_id AS TEXT) ILIKE %s
+                      OR u.username ILIKE %s
+                      OR CAST(t.team_id AS TEXT) ILIKE %s"""
+        params = [f'%{q}%'] * 3
 
     sql_count = f"SELECT COUNT(DISTINCT u.user_id) {base_from} {where}"
+
     sql_rows = f"""
-    SELECT u.user_id,u.username,u.role,u.is_blocked,          -- ← добавили
-           COALESCE(string_agg(t.team_name||' ('||t.team_id||')',', '),'—') AS teams
-    {base_from} {where}
-    GROUP BY u.user_id
-    ORDER BY {sort} {dir_sql}
-    LIMIT %s OFFSET %s"""
+        SELECT u.user_id,
+               u.username,
+               COALESCE(t.team_name||' ('||t.team_id||')','—') AS team,
+               u.role,
+               u.is_blocked
+          {base_from} {where}
+         GROUP BY u.user_id, u.username, u.role, u.is_blocked, t.team_name, t.team_id
+         ORDER BY {sort} {dir_sql}, u.user_id
+         LIMIT %s OFFSET %s
+    """
+
+    PER_PAGE     = 10
+    params_rows  = params + [PER_PAGE, (page-1)*PER_PAGE]
+
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute(sql_count, params);      total  = cur.fetchone()[0]
+    cur.execute(sql_rows , params_rows); users  = cur.fetchall()
+    cur.close(); conn.close()
+
+    pages = (total + PER_PAGE - 1) // PER_PAGE
+    return render_template('admin_users.html',
+                           page_title='Пользователи',
+                           users=users, q=q,
+                           page=page, pages=pages,
+                           sort=sort, order=order)
 
 
-    users,pages,_=paginated(sql_count,sql_rows,params,page)
-    return render_template('admin_users.html',page_title='Пользователи',
-                           users=users,page=page,pages=pages,q=q,
-                           sort=sort,order=order)
 
 @app.route('/admin/teams')
 @admin_required
@@ -602,103 +694,98 @@ def team_has_blocked(team_id, cur) -> bool:
     return cur.fetchone() is not None
 
 
+# ───────────────────────── EVENTS (игрок) ─────────────────────────
+# ───────────────── EVENTS (игрок) ───────────────────────────────
 @app.route('/events', methods=['GET', 'POST'])
 @login_required
 def events():
     team, _ = current_team()
     if not team:
-        return render_template('events.html',
-                               team=None,
-                               page_title='События')
+        flash('Нужно состоять в команде', 'error')
+        return render_template('events.html', team=None, page_title='События')
 
     conn = get_db_connection(); cur = conn.cursor()
 
     # ---------- POST ----------
     if request.method == 'POST':
-        def try_join(event_id):
-            if team_has_blocked(team['team_id'], cur):
-                flash('Невозможно присоединиться: один из участников команды заблокирован', 'error')
-                return
-            try:
-                cur.execute("INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
-                            (event_id, team['team_id']))
-                conn.commit()
-            except psycopg2.errors.UniqueViolation:
-                conn.rollback(); flash('Команда уже участвует', 'error')
-
-        if 'code' in request.form:                    # участие по коду
+        # 1) присоединение по коду
+        if 'code' in request.form:
             code = request.form['code'][:16]
             cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code,))
             ev = cur.fetchone()
             if not ev:
-                flash('Код не найден', 'error')
+                flash('Код не найден', 'modal-join-error')
             elif ev[1] != 'waiting':
-                flash('Регистрация закрыта', 'error')
+                flash('Регистрация закрыта', 'modal-join-error')
             else:
-                try_join(ev[0])
+                try:
+                    cur.execute("""INSERT INTO event_teams(event_id,team_id)
+                                   VALUES(%s,%s)""",
+                                (ev[0], team['team_id']))
+                    conn.commit()
+                except psycopg2.errors.UniqueViolation:
+                    conn.rollback(); flash('Команда уже участвует','modal-join-error')
 
-        elif 'join_eid' in request.form:              # кнопка «Участвовать»
-            try_join(request.form['join_eid'])
+        # 2) присоединение кнопкой «Участвовать» (карточка)
+        elif 'join_event' in request.form:
+            eid = request.form['join_event']
+            try:
+                cur.execute("""INSERT INTO event_teams(event_id,team_id)
+                               VALUES(%s,%s)""", (eid, team['team_id']))
+                conn.commit()
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback()
 
         cur.close(); conn.close()
-        return redirect(url_for('events'))
+        return redirect(url_for('events'))            # PRG-паттерн
 
     # ---------- GET ----------
-    # текущее (последнее) событие команды
+
+    # 1) текущий ивент команды (waiting / running)
     cur.execute("""
-        SELECT e.event_id,e.name,e.status,e.type,e.description,
-               et.points,e.file_path
+        SELECT e.event_id,e.name,e.status,e.type,e.description,e.file_path
           FROM events e
           JOIN event_teams et USING(event_id)
-         WHERE et.team_id = %s
-           AND e.event_id = (SELECT MAX(event_id)
-                               FROM event_teams
-                              WHERE team_id = %s)
-    """, (team['team_id'], team['team_id']))
-    current = cur.fetchone()
+         WHERE et.team_id=%s AND e.status IN ('waiting','running')
+         ORDER BY e.event_id DESC LIMIT 1
+    """, (team['team_id'],))
+    cur_ev = cur.fetchone()
 
-    # показываем форму/карточки, если события нет ИЛИ оно уже finished
-    show_join = (current is None) or (current[2] == 'finished')
-
-    waiting_events = []
-    if show_join:
-        cur.execute("""
-            SELECT e.event_id,
-                   e.name,
-                   e.type,
-                   e.description,
-                   COUNT(et.team_id) AS q
-              FROM events e
-              LEFT JOIN event_teams et ON et.event_id = e.event_id
-             WHERE e.status = 'waiting'
-             GROUP BY e.event_id
-             ORDER BY e.event_id DESC
-        """)
-        waiting_events = cur.fetchall()
-
-    # лидерборд
     leaderboard = []
-    if current and current[2] in ('running', 'finished'):
-        cur.execute("""
-            SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
-                   t.team_name,
-                   et.points
-              FROM event_teams et
-              JOIN teams t USING(team_id)
-             WHERE et.event_id=%s
-             ORDER BY et.points DESC
-        """, (current[0],))
+    if cur_ev and cur_ev[2] in ('running',):
+        cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
+                              t.team_name, et.points
+                         FROM event_teams et
+                         JOIN teams t USING(team_id)
+                        WHERE et.event_id=%s
+                        ORDER BY et.points DESC""",
+                    (cur_ev[0],))
         leaderboard = cur.fetchall()
+
+    # 2) доступные waiting-события, куда команда ещё НЕ записана
+    cur.execute("""
+        SELECT e.event_id,e.name,e.type,e.description,
+               (SELECT COUNT(*) FROM event_teams et
+                 WHERE et.event_id=e.event_id)     AS teams_cnt
+          FROM events e
+         WHERE e.status='waiting'
+           AND NOT EXISTS (SELECT 1 FROM event_teams
+                            WHERE event_id=e.event_id
+                              AND team_id=%s)
+         ORDER BY e.event_id DESC
+    """, (team['team_id'],))
+    waiting = cur.fetchall()
 
     cur.close(); conn.close()
 
     return render_template('events.html',
                            page_title='События',
                            team=team,
-                           waiting=waiting_events,
-                           current=current,
-                           lb=leaderboard,
-                           show_join=show_join)
+                           cur_ev=cur_ev,
+                           leaderboard=leaderboard,
+                           waiting=waiting)
+
+
 
 @app.route('/submit_answer/<int:eid>', methods=['POST'])
 @login_required
@@ -800,78 +887,82 @@ def mod_create():
 @app.route('/mod/manage', methods=['GET', 'POST'])
 @moderator_required
 def mod_manage():
-    # ---------------------------------------------------
-    # 1) кнопка-крестик → /mod/manage?close=1
-    # ---------------------------------------------------
-    if request.args.get('close'):
-        return redirect(url_for('mod_manage'))
-
-    code = request.values.get('code', '')[:16]     # запоминаем введённый код
+    code = request.values.get('code', '').strip()[:16]
     ev   = teams = None
+    active = []                      # карточки waiting / running
 
     conn = get_db_connection(); cur = conn.cursor()
 
-    # ---------- POST действие ----------
+    # ---------- POST ----------
     if request.method == 'POST':
         cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
         if ev:
             eid, _, status = ev
+
             if 'start' in request.form and status == 'waiting':
                 cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
             elif 'finish' in request.form and status != 'finished':
                 cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
-            elif 'pts' in request.form and status != 'finished':
-                tid   = request.form['tid']
-                delta = int(request.form['delta'])
+            elif 'delta' in request.form and status != 'finished':
                 cur.execute("""UPDATE event_teams
-                                 SET points = points + %s
+                                 SET points = GREATEST(points + %s, 0)
                                WHERE event_id=%s AND team_id=%s""",
-                            (delta, eid, tid))
+                            (int(request.form['delta']),
+                             eid,
+                             int(request.form['tid'])))
+            elif 'dq' in request.form and status != 'finished':
+                cur.execute("DELETE FROM event_teams WHERE event_id=%s AND team_id=%s",
+                            (eid, int(request.form['tid'])))
+
             conn.commit()
+
+        cur.close(); conn.close()
         return redirect(url_for('mod_manage', code=code))
 
-    # ---------- GET: открыто ли событие ----------
+    # ---------- GET ----------
     if code:
         cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
         if ev:
             eid = ev[0]
             cur.execute("""
-                SELECT et.team_id, t.team_name, et.points,
-                    COALESCE((SELECT answer  FROM event_submits s
-                                WHERE s.team_id=et.team_id AND s.event_id=et.event_id
-                                ORDER BY ts DESC LIMIT 1),'') AS last_answer,
-                    COALESCE((SELECT to_char(ts,'DD.MM HH24:MI')
-                                FROM event_submits s
-                                WHERE s.team_id=et.team_id AND s.event_id=et.event_id
-                                ORDER BY ts DESC LIMIT 1),'') AS last_ts
-                FROM event_teams et JOIN teams t USING(team_id)
-                WHERE et.event_id=%s
-                ORDER BY et.id
+                SELECT et.team_id,
+                       t.team_name,
+                       et.points,
+                       COALESCE(ls.answer,'')                    AS last_answer,
+                       COALESCE(TO_CHAR(ls.ts,'HH24:MI:SS'),'—') AS last_ts
+                  FROM event_teams et
+                  JOIN teams t USING(team_id)
+                  LEFT JOIN LATERAL (
+                        SELECT answer, ts
+                          FROM event_submits s
+                         WHERE s.team_id = et.team_id
+                           AND s.event_id = et.event_id
+                         ORDER BY ts DESC
+                         LIMIT 1) ls ON TRUE
+                 WHERE et.event_id=%s
+                 ORDER BY et.id
             """, (eid,))
             teams = cur.fetchall()
-
-    # ---------- waiting-карточки ----------
-    wait_cards = []
-    if not ev:
+    else:
+        # список доступных событий waiting / running
         cur.execute("""
-            SELECT e.event_id,e.code,e.name,e.type,e.description,
-                COUNT(et.team_id) AS q ,e.status
-            FROM events e
-            LEFT JOIN event_teams et ON et.event_id=e.event_id
-            WHERE e.status IN ('waiting','running')
-            GROUP BY e.event_id
-            ORDER BY e.event_id DESC
+            SELECT e.code, e.name, e.type, e.status,
+                   (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams
+              FROM events e
+             WHERE e.status IN ('waiting','running')
+             ORDER BY e.event_id DESC
         """)
-        wait_cards = cur.fetchall()
+        active = cur.fetchall()
 
     cur.close(); conn.close()
+
     return render_template('mod_manage.html',
                            page_title='Проведение события',
                            ev=ev, teams=teams,
-                           wait_cards=wait_cards,
-                           code_entered=code)
+                           code_entered=code,
+                           active_events=active)
 
 
 
