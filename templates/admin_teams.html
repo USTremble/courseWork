@@ -49,7 +49,7 @@
                       <button name="act" value="disband">Расформировать</button>
                       <div style="padding:8px">
                         <input name="kick_uid" placeholder="UID" style="width:70px">
-                        <button name="act" value="kick" style="margin-top:4px">Исключить</button>
+                        <option value="kick" data-tid="{{ t[0] }}">Исключить участника</option>
                       </div>
                     </form>
                   </div>
@@ -61,11 +61,28 @@
     </tbody>
 </table>
 </div>
-
 <div class="table-pagination">
 {% for p in range(1, pages+1) %}
    {% if p==page %}<strong>{{ p }}</strong>
    {% else %}<a href="{{ url_for('admin_teams', page=p, q=q, sort=sort, dir=order) }}">{{ p }}</a>{% endif %}
 {% endfor %}
 </div>
+
+<script>
+  document.querySelectorAll('option[value="kick"]').forEach(opt=>{
+  opt.parentElement.addEventListener('change',e=>{
+    if(e.target.value==='kick'){
+      const uid = prompt('UID участника для исключения:');
+      if(uid){
+        const frm = e.target.form;
+        frm.insertAdjacentHTML('beforeend',
+           `<input type="hidden" name="kick_uid" value="${uid}">`);
+        frm.submit();
+      }
+    }
+  });
+});
+
+</script>
+
 {% endblock %}

@@ -2,7 +2,15 @@
 {% block title %}Создать событие{% endblock %}
 {% block content %}
 <h1>Создать событие</h1>
-{% if msg %}<p style="color:var(--accent)">{{ msg }}</p>{% endif %}
+{% if msg %}
+  <div class="content-box" style="margin-top:16px">
+    {{ msg }}
+    {% if link %}
+      <a href="{{ link }}">Перейти к проведению</a>
+    {% endif %}
+  </div>
+{% endif %}
+
 <form method="post" enctype="multipart/form-data" class="content-box" style="max-width:460px">
    <label>Код (до 16 символов)</label><input name="code" required>
    <label>Название</label><input name="name" required>

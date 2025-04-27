@@ -1,9 +1,84 @@
 {% extends 'base.html' %}
 {% block title %}Главная{% endblock %}
+
 {% block content %}
-<h1>Добро пожаловать, {{ g.user }}!</h1>
-<div class="content-box">
-    <p>Это стартовая страница вашей авторизованной зоны.</p>
-    <p>Используйте меню слева для навигации.</p>
-</div>
+<h1 style="text-align:center;margin:20px 0">IB Competition</h1>
+
+<section class="content-box" style="max-width:900px;margin:auto">
+  <p>
+    Добро пожаловать на портал соревнований. Здесь отображаются&nbsp;15
+    последних завершённых событий.
+  </p>
+</section>
+
+{% if finished %}
+  <h2 style="margin-top:36px">Последние события</h2>
+
+  <div class="card-grid">
+    {% for f in finished %}
+      <div class="card">
+        <h4>{{ f.name }}</h4>
+        <p>Тип: {{ f.type|upper }}</p>
+        <p>{{ f.description }}</p>
+        <p>Победитель: <strong>{{ f.winner }}</strong></p>
+
+        <button class="btn" onclick="showInfo({{ loop.index0 }})">
+          Подробнее
+        </button>
+
+        <!-- ── модалка ── -->
+        <div class="modal" id="dlg{{ loop.index0 }}">
+          <div class="modal-body">
+            <h3 style="margin-top:0">{{ f.name }}</h3>
+            <p>{{ f.description }}</p>
+            <p><strong>Тип:</strong> {{ f.type|upper }}</p>
+
+            <h4 style="margin:14px 0 6px">Лидерборд</h4>
+            <table class="admin-table">
+              <thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead>
+              <tbody>
+              {% for r in f.lb %}
+                <tr {% if r[1]==f.winner %}style="background:#e1f7ee"{% endif %}>
+                  <td>{{ r[0] }}</td><td>{{ r[1] }}</td><td>{{ r[2] }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+
+            <p style="margin-top:12px"><strong>Победитель:</strong> {{ f.winner }}</p>
+            <p><strong>Проводящий:</strong> {{ f.host }}</p>
+
+            <button class="btn" onclick="closeInfo('{{ loop.index0 }}')">
+              Закрыть
+            </button>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <p style="margin-top:32px">Завершённых событий пока нет.</p>
+{% endif %}
+
+<script>
+function showInfo(i){ document.getElementById('dlg'+i).style.display='flex'; }
+function closeInfo(i){ document.getElementById('dlg'+i).style.display='none'; }
+</script>
 {% endblock %}
+
+<style>
+.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:16px;margin-top:16px}
+.card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.card h4{margin:0 0 6px 0}
+.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;margin-top:6px}
+.admin-table{border-collapse:collapse;width:100%}
+.admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
+.admin-table thead{background:#f0f6fa;font-weight:600}
+/* центрированная модалка */
+.modal{display:none;position:fixed;inset:0;
+       background:rgba(0,0,0,.45);            /* ← был .35, цвет остался */
+       z-index:999;align-items:center;justify-content:center;padding:20px}
+.modal-body{max-width:420px;width:100%;background:#fff;border-radius:8px;
+            padding:22px;box-shadow:0 4px 12px rgba(0,0,0,.25);overflow:auto}
+</style>

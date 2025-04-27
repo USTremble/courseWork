@@ -1,112 +1,122 @@
 {% extends 'base.html' %}
 {% block title %}Проведение события{% endblock %}
+
 {% block content %}
-<h1>Панель модератора</h1>
+<h1>Проведение события</h1>
 
-<form method="post" class="content-box" style="max-width:320px">
-  <label>Код события</label>
-  <input name="code" value="{{ code_entered }}">
-  <button class="btn" style="margin-top:8px">Открыть</button>
-</form>
+{# ─── панель модератора (waiting + running) ─── #}
+{% if not ev %}
+  <form method="get" class="content-box" style="max-width:340px">
+    <label>Код события</label>
+    <input name="code" value="{{ code_entered }}" required>
+    <button class="btn" style="margin-top:6px">Открыть</button>
+  </form>
 
-{% if ev %}
-<div class="content-box" id="eventPanel" style="margin-top:20px;position:relative">
-  <span class="close"
-        style="position:absolute;right:12px;top:10px;cursor:pointer;font-size:1.3rem"
-        onclick="document.getElementById('eventPanel').remove()">✖</span>
-
-  <div style="display:flex;justify-content:space-between;align-items:center">
-    <h2>Управление событием — {{ ev[1] }} ({{ ev[2] }})</h2>
-    <button class="btn btn-outline" onclick="location.reload()">Обновить таблицу</button>
-  </div>
-
-  {% if ev[2]=='waiting' %}
-     <form method="post" style="margin-bottom:12px">
-       <input type="hidden" name="code" value="{{ code_entered }}">
-       <button name="start" class="btn">Начать событие</button>
-     </form>
-  {% elif ev[2]=='running' %}
-     <form method="post" style="margin-bottom:12px">
-       <input type="hidden" name="code" value="{{ code_entered }}">
-       <button name="finish" class="btn btn-outline">Завершить событие</button>
-     </form>
+  {% if wait_cards %}
+    <h2 style="margin-top:28px">Ожидающие / Идут</h2>
+    <div class="card-grid">
+      {% for w in wait_cards %}
+        <div class="card">
+          <h4>{{ w[2] }}</h4>
+          <p>{{ w[4] }}</p>
+          <p>Тип: {{ w[3]|upper }}</p>
+          <p>Статус: {{ w[6] }}</p>
+          <p>Команд: {{ w[5] }}</p>
+          <form method="get">
+            <input type="hidden" name="code" value="{{ w[1] }}">
+            <button class="btn">Провести событие</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
   {% endif %}
-
-  <table class="admin-table">
-    <thead><tr>
-      <th>Команда</th><th>Очки</th><th>Последний ответ</th><th>Время</th><th></th>
-    </tr></thead>
-    <tbody>
-    {% for t in teams %}
-      <tr>
-        <td>{{ t[1] }}</td>
-        <td>{{ t[2] }}</td>
-        <td>{{ t[3] }}</td>
-        <td>{{ t[4] or '' }}</td>
-        <td>
-            {% if ev[2] != 'finished' %}
-              <div class="action-wrapper">
-                <a class="action-btn" href="#">⋯</a>
-                <div class="action-menu">
-                  <form method="post" class="action-form" data-sign="1">
-                    <input type="hidden" name="code"  value="{{ code_entered }}">
-                    <input type="hidden" name="tid"   value="{{ t[0] }}">
-                    <input type="hidden" name="delta">
-                    <button name="pts">Добавить очки</button>
-                  </form>
-                  <form method="post" class="action-form" data-sign="-1">
-                    <input type="hidden" name="code"  value="{{ code_entered }}">
-                    <input type="hidden" name="tid"   value="{{ t[0] }}">
-                    <input type="hidden" name="delta">
-                    <button name="pts">Снять очки</button>
-                  </form>
-                  <form method="post">
-                    <input type="hidden" name="code"  value="{{ code_entered }}">
-                    <input type="hidden" name="tid"   value="{{ t[0] }}">
-                    <button name="dq" style="color:#e05555">Дисквалифицировать</button>
-                  </form>
-                </div>
-              </div>
-            {% endif %}
-          </td>          
-      </tr>
-    {% endfor %}
-    </tbody>
-  </table>
-</div>
 {% endif %}
 
-<script>
-    /* выпадающее меню */
-    document.querySelectorAll('.action-wrapper').forEach(w=>{
-      const menu = w.querySelector('.action-menu');
-      w.querySelector('.action-btn').onclick=e=>{
-        e.preventDefault(); menu.classList.toggle('open');
-      };
-    });
-    
-    /* модальное ввода Δ очков */
-    document.querySelectorAll('.action-form').forEach(f=>{
-      f.onsubmit = ()=>{
-        const sign = parseInt(f.dataset.sign);
-        let n = prompt('Сколько очков (1–10)?');
-        if(!n) return false;
-        n = parseInt(n);
-        if(isNaN(n)||n<1||n>10){ alert('Введите число 1–10'); return false; }
-        f.delta.value = sign * n;
-        return true;
-      };
-    });
-</script>
-    
-<style>
-    .action-wrapper{position:relative;display:inline-block}
-    .action-btn{padding:4px 8px;border:1px solid var(--accent);border-radius:4px;font-size:.9rem}
-    .action-menu{display:none;position:absolute;z-index:5;right:0;top:110%;background:#fff;
-                 box-shadow:0 4px 8px rgba(0,0,0,.1);padding:8px;border-radius:6px}
-    .action-menu.open,.action-wrapper:hover .action-menu{display:block}
-    .action-menu button{background:none;border:none;text-align:left;padding:4px 6px;width:100%}
-    .action-menu button:hover{background:#f0f0f0;cursor:pointer}
-</style>
-    
+{# ─── управление выбранным событием ─── #}
+{% if ev %}
+  <div class="content-box" style="margin-top:24px">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2 style="margin:0">{{ ev[1] }} <small>({{ ev[2] }})</small></h2>
+      <a href="{{ url_for('mod_manage', close=1) }}"
+         style="font-size:22px;text-decoration:none">&#10005;</a>
+    </div>
+
+    <div style="margin:16px 0">
+      {% if ev[2]=='waiting' %}
+        <form method="post" style="display:inline">
+          <input type="hidden" name="code" value="{{ code_entered }}">
+          <button name="start" class="btn">Начать событие</button>
+        </form>
+      {% elif ev[2]!='finished' %}
+        <form method="post" style="display:inline">
+          <input type="hidden" name="code" value="{{ code_entered }}">
+          <button name="finish" class="btn">Завершить событие</button>
+        </form>
+      {% endif %}
+    </div>
+
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>#</th><th>Команда</th><th>Очки</th>
+          <th>Последний ответ / время</th>
+          {% if ev[2] != 'finished' %}<th>Действие</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in teams %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td style="text-align:left">{{ t[1] }}</td>
+          <td>{{ t[2] }}</td>
+          <td style="text-align:left">{{ t[3] }}&nbsp;<small>{{ t[4] }}</small></td>
+
+          {% if ev[2] != 'finished' %}
+          <td>
+            <select onchange="doAct(this, '{{ t[0] }}')">
+              <option selected disabled>⋮</option>
+              <option value="+1">+ очко</option>
+              <option value="-1">− очко</option>
+              <option value="dq">Дисквалифицировать</option>
+            </select>
+          </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <form id="actFrm" method="post" style="display:none">
+    <input type="hidden" name="tid">
+    <input type="hidden" name="delta">
+    <input type="hidden" name="code" value="{{ code_entered }}">
+  </form>
+{% endif %}
 {% endblock %}
+
+{# ─── стили и JS ─── #}
+<style>
+.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px;margin-top:16px}
+.card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+.admin-table{border-collapse:collapse;width:100%;margin-top:8px}
+.admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
+.admin-table thead{background:#f0f6fa;font-weight:600}
+</style>
+
+<script>
+function doAct(sel, tid){
+  const v = sel.value;
+  sel.selectedIndex = 0;                      // сброс селекта
+  if(!v) return;
+
+  if(v==='dq' && !confirm('Дисквалифицировать команду?')) return;
+
+  const frm = document.getElementById('actFrm');
+  frm.tid.value = tid;
+  frm.delta.value = (v==='dq' ? -255 : v);
+  frm.submit();
+}
+</script>

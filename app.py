@@ -138,8 +138,50 @@ def logout():
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html', page_title='Главная')
+    """главная после авторизации: текст + 15 последних завершённых событий"""
+    conn = get_db_connection(); cur = conn.cursor()
 
+    # 15 последних finished-событий
+    cur.execute("""
+        SELECT e.event_id,
+               e.name, e.type, e.description,
+               t.team_name               AS winner,
+               u.username                AS host
+          FROM events e
+          JOIN event_teams et ON et.event_id = e.event_id
+          JOIN teams t        ON t.team_id   = et.team_id
+          JOIN users u        ON u.user_id   = e.created_by
+         WHERE e.status = 'finished'
+           AND et.points = (SELECT MAX(points)
+                               FROM event_teams
+                              WHERE event_id = e.event_id)
+         GROUP BY e.event_id, t.team_name, u.username
+         ORDER BY e.event_id DESC
+         LIMIT 15
+    """)
+    finished = []
+    for row in cur.fetchall():
+        # лидерборд каждой карточки
+        cur.execute("""
+            SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
+                   t.team_name, et.points
+              FROM event_teams et JOIN teams t USING(team_id)
+             WHERE et.event_id=%s
+             ORDER BY et.points DESC
+        """, (row[0],))
+        finished.append({
+            'name'      : row[1],
+            'type'      : row[2],
+            'description': row[3],
+            'winner'    : row[4],
+            'host'      : row[5],
+            'lb'        : cur.fetchall()
+        })
+    cur.close(); conn.close()
+
+    return render_template('dashboard.html',
+                           page_title='Главная',
+                           finished=finished)
 
 # ─────────────────────────── user_stats ───────────────────────────
 def user_stats(uid: int) -> dict:
@@ -473,13 +515,14 @@ def admin_users():
         params=[f'%{q}%']*3
 
     sql_count = f"SELECT COUNT(DISTINCT u.user_id) {base_from} {where}"
-    sql_rows  = f"""SELECT u.user_id,u.username,
-                           COALESCE(string_agg(t.team_name||' ('||t.team_id||')',', '),'—') AS teams,
-                           u.role
-                    {base_from} {where}
-                    GROUP BY u.user_id
-                    ORDER BY {sort} {dir_sql}
-                    LIMIT %s OFFSET %s"""
+    sql_rows = f"""
+    SELECT u.user_id,u.username,u.role,u.is_blocked,          -- ← добавили
+           COALESCE(string_agg(t.team_name||' ('||t.team_id||')',', '),'—') AS teams
+    {base_from} {where}
+    GROUP BY u.user_id
+    ORDER BY {sort} {dir_sql}
+    LIMIT %s OFFSET %s"""
+
 
     users,pages,_=paginated(sql_count,sql_rows,params,page)
     return render_template('admin_users.html',page_title='Пользователи',
@@ -547,6 +590,18 @@ def admin_team_action():
     return redirect(request.referrer or url_for('admin_teams'))
 
 # ───────────────── EVENTS (игрок) ─────────────────
+
+def team_has_blocked(team_id, cur) -> bool:
+    cur.execute("""
+        SELECT 1
+          FROM team_members tm
+          JOIN users u ON u.user_id = tm.user_id
+         WHERE tm.team_id = %s AND u.is_blocked
+         LIMIT 1
+    """, (team_id,))
+    return cur.fetchone() is not None
+
+
 @app.route('/events', methods=['GET', 'POST'])
 @login_required
 def events():
@@ -560,7 +615,18 @@ def events():
 
     # ---------- POST ----------
     if request.method == 'POST':
-        if 'code' in request.form:                     # присоединение по коду
+        def try_join(event_id):
+            if team_has_blocked(team['team_id'], cur):
+                flash('Невозможно присоединиться: один из участников команды заблокирован', 'error')
+                return
+            try:
+                cur.execute("INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
+                            (event_id, team['team_id']))
+                conn.commit()
+            except psycopg2.errors.UniqueViolation:
+                conn.rollback(); flash('Команда уже участвует', 'error')
+
+        if 'code' in request.form:                    # участие по коду
             code = request.form['code'][:16]
             cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code,))
             ev = cur.fetchone()
@@ -569,24 +635,13 @@ def events():
             elif ev[1] != 'waiting':
                 flash('Регистрация закрыта', 'error')
             else:
-                try:
-                    cur.execute("INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
-                                (ev[0], team['team_id']))
-                    conn.commit()
-                except psycopg2.errors.UniqueViolation:
-                    conn.rollback(); flash('Команда уже участвует', 'error')
+                try_join(ev[0])
 
-        elif 'join_eid' in request.form:               # кнопка «Участвовать»
-            eid = request.form['join_eid']
-            try:
-                cur.execute("INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
-                            (eid, team['team_id']))
-                conn.commit()
-            except psycopg2.errors.UniqueViolation:
-                conn.rollback(); flash('Команда уже участвует', 'error')
+        elif 'join_eid' in request.form:              # кнопка «Участвовать»
+            try_join(request.form['join_eid'])
 
         cur.close(); conn.close()
-        return redirect(url_for('events'))              # PRG-паттерн
+        return redirect(url_for('events'))
 
     # ---------- GET ----------
     # текущее (последнее) событие команды
@@ -645,10 +700,6 @@ def events():
                            lb=leaderboard,
                            show_join=show_join)
 
-
-
-
-
 @app.route('/submit_answer/<int:eid>', methods=['POST'])
 @login_required
 def submit_answer(eid):
@@ -693,52 +744,75 @@ def submit_answer(eid):
 @app.route('/mod/create', methods=['GET', 'POST'])
 @moderator_required
 def mod_create():
-    msg = None
+    """
+    Создание события. Всегда возвращает HTML-страницу.
+    После успешной вставки выводит сообщение + ссылку «Перейти к проведению».
+    """
+    msg = link = None                    # ← по умолчанию ничего
+
     if request.method == 'POST':
+        # ---------- чтение формы ----------
         code    = request.form['code'][:16] or random_code()
         name    = request.form['name'][:64]
         desc    = request.form['desc']
-        ev_type = request.form['ev_type']            # quiz / ctf
+        ev_type = request.form['ev_type']          # quiz / ctf
         answer  = request.form['answer'].strip()
         pdf     = request.files.get('task')
 
-        # ─── валидация PDF ───
+        # ---------- валидация ----------
         if not pdf or not pdf.filename.lower().endswith('.pdf'):
             msg = 'Нужен PDF-файл'
         else:
-            filename = secure_filename(pdf.filename)            # защищаем имя
-            rel_path = os.path.join('tasks', filename)          #   tasks/quiz1.pdf
-            abs_path = os.path.join(app.static_folder, rel_path)  # static/tasks/quiz1.pdf
-            pdf.save(abs_path)                                  # сохраняем файл
+            # сохраняем pdf в static/tasks/
+            filename = secure_filename(pdf.filename)
+            rel_path = os.path.join('tasks', filename)
+            abs_path = os.path.join(app.static_folder, rel_path)
+            pdf.save(abs_path)
 
-            # ─── вставляем событие ───
+            # ---------- запись в БД ----------
             conn = get_db_connection(); cur = conn.cursor()
             try:
                 cur.execute("""
                     INSERT INTO events(code,name,description,type,answer,file_path,created_by)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
-                    """,
-                    (code, name, desc, ev_type, answer, rel_path, session['user_id']))
+                    RETURNING code,name
+                """, (code, name, desc, ev_type, answer, rel_path, session['user_id']))
+                code_ret, name_ret = cur.fetchone()
                 conn.commit()
-                msg = 'Событие создано'
+
+                # сообщение + ссылка
+                msg  = f'Событие «{ name_ret }» создано.'
+                link = url_for('mod_manage', code=code_ret)
+
             except psycopg2.errors.UniqueViolation:
-                conn.rollback(); msg = 'Код события уже занят'
+                conn.rollback()
+                msg = 'Код события уже занят'
             finally:
                 cur.close(); conn.close()
 
+    # ---------- всегда возвращаем шаблон ----------
     return render_template('mod_create.html',
                            page_title='Создать событие',
-                           msg=msg)
+                           msg=msg,
+                           link=link)
+
 
 @app.route('/mod/manage', methods=['GET', 'POST'])
 @moderator_required
 def mod_manage():
-    code = request.values.get('code', '')[:16]          # сохраняем введённый код
+    # ---------------------------------------------------
+    # 1) кнопка-крестик → /mod/manage?close=1
+    # ---------------------------------------------------
+    if request.args.get('close'):
+        return redirect(url_for('mod_manage'))
+
+    code = request.values.get('code', '')[:16]     # запоминаем введённый код
     ev   = teams = None
 
-    # ─── POST: любые действия ───
+    conn = get_db_connection(); cur = conn.cursor()
+
+    # ---------- POST действие ----------
     if request.method == 'POST':
-        conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
         if ev:
@@ -747,61 +821,58 @@ def mod_manage():
                 cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
             elif 'finish' in request.form and status != 'finished':
                 cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
-
-                # ── фиксируем участие всех активных членов команд, если они ещё не отправляли ──
-                cur.execute("""
-                    INSERT INTO event_submits(event_id,team_id,user_id,answer)
-                    SELECT et.event_id, et.team_id, tm.user_id, ''
-                    FROM event_teams et
-                    JOIN team_members tm ON tm.team_id = et.team_id AND tm.active = TRUE
-                    WHERE et.event_id = %s
-                    AND NOT EXISTS (
-                        SELECT 1 FROM event_submits s
-                            WHERE s.event_id = et.event_id
-                            AND s.user_id  = tm.user_id)
-                """, (eid,))
-
             elif 'pts' in request.form and status != 'finished':
                 tid   = request.form['tid']
                 delta = int(request.form['delta'])
                 cur.execute("""UPDATE event_teams
-                                SET points = points + %s
-                            WHERE event_id=%s AND team_id=%s""",
+                                 SET points = points + %s
+                               WHERE event_id=%s AND team_id=%s""",
                             (delta, eid, tid))
-
             conn.commit()
-            cur.close(); conn.close()
-        # PRG — чтобы на F5 не повторялся POST
         return redirect(url_for('mod_manage', code=code))
 
-    # ─── GET: показать событие ───
+    # ---------- GET: открыто ли событие ----------
     if code:
-        conn = get_db_connection(); cur = conn.cursor()
         cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
         ev = cur.fetchone()
         if ev:
             eid = ev[0]
             cur.execute("""
-                SELECT et.team_id,
-                       t.team_name,
-                       et.points,
-                       COALESCE((SELECT answer FROM event_submits s
-                                  WHERE s.team_id=et.team_id AND s.event_id=et.event_id
-                                  ORDER BY ts DESC LIMIT 1),'') AS last_answer,
-                       COALESCE((SELECT ts FROM event_submits s
-                                  WHERE s.team_id=et.team_id AND s.event_id=et.event_id
-                                  ORDER BY ts DESC LIMIT 1),NULL) AS last_ts
-                  FROM event_teams et
-                  JOIN teams t USING(team_id)
-                 WHERE et.event_id=%s
-                 ORDER BY et.id
+                SELECT et.team_id, t.team_name, et.points,
+                    COALESCE((SELECT answer  FROM event_submits s
+                                WHERE s.team_id=et.team_id AND s.event_id=et.event_id
+                                ORDER BY ts DESC LIMIT 1),'') AS last_answer,
+                    COALESCE((SELECT to_char(ts,'DD.MM HH24:MI')
+                                FROM event_submits s
+                                WHERE s.team_id=et.team_id AND s.event_id=et.event_id
+                                ORDER BY ts DESC LIMIT 1),'') AS last_ts
+                FROM event_teams et JOIN teams t USING(team_id)
+                WHERE et.event_id=%s
+                ORDER BY et.id
             """, (eid,))
             teams = cur.fetchall()
-        cur.close(); conn.close()
 
+    # ---------- waiting-карточки ----------
+    wait_cards = []
+    if not ev:
+        cur.execute("""
+            SELECT e.event_id,e.code,e.name,e.type,e.description,
+                COUNT(et.team_id) AS q ,e.status
+            FROM events e
+            LEFT JOIN event_teams et ON et.event_id=e.event_id
+            WHERE e.status IN ('waiting','running')
+            GROUP BY e.event_id
+            ORDER BY e.event_id DESC
+        """)
+        wait_cards = cur.fetchall()
+
+    cur.close(); conn.close()
     return render_template('mod_manage.html',
                            page_title='Проведение события',
-                           ev=ev, teams=teams, code_entered=code)
+                           ev=ev, teams=teams,
+                           wait_cards=wait_cards,
+                           code_entered=code)
+
 
 
 # ───────── index ────────────────────────────────────────
