@@ -1,145 +1,171 @@
-from flask import (
-    Flask, render_template, request, redirect,
-    url_for, session, g, flash
-)
+# -*- coding: utf-8 -*-
+"""
+Flask-REST сервер IB Competition.
+Версия 3.2 — добавлены эндпоинты admin-панели:
+    • GET  /api/admin/users   + POST /api/admin/user_action
+    • GET  /api/admin/teams   + POST /api/admin/team_action
+Всё остальное — как в 3.1.
+"""
+
+import os, random, string
 from functools import wraps
+import psycopg2, psycopg2.errors
+
+from flask import (
+    Flask, request, jsonify, session, g,
+    send_from_directory, abort
+)
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
-import psycopg2, psycopg2.errors
-import os, random, string, re
-from psycopg2.errors import NumericValueOutOfRange
 
-# ========== инициализация Flask ==========
-app = Flask(__name__, template_folder='templates', static_folder='static')
-app.secret_key = '777'
+try:
+    from flask_cors import CORS          # для локальной отладки фронта
+except ImportError:
+    CORS = None
 
-# ========== директория для PDF-заданий ==========
-UPLOAD_DIR = os.path.join(app.static_folder, 'tasks')
+# ─────────────────────── конфиг ───────────────────────
+app = Flask(__name__, static_folder="static", static_url_path="/static")
+app.secret_key = os.getenv("SECRET_KEY", "777")
+if CORS:
+    CORS(app, supports_credentials=True)
+
+UPLOAD_DIR = os.path.join(app.static_folder, "tasks")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-EVENTS_PER_PAGE = 10           # оставьте, если уже объявлено выше
+EVENTS_PER_PAGE = 10
+PER_PAGE        = 10
+HIST_PER_PAGE   = 15
 
 def get_db_connection():
     return psycopg2.connect(
-        dbname='competition',
-        user='uster',
-        password='1234',
-        host='localhost',
-        port='5432'
+        dbname   = os.getenv("DB_NAME", "competition"),
+        user     = os.getenv("DB_USER", "uster"),
+        password = os.getenv("DB_PASS", "1234"),
+        host     = os.getenv("DB_HOST", "localhost"),
+        port     = os.getenv("DB_PORT", "5432")
     )
 
-def random_code(n=6):            # пригодится, если пользователь не ввёл код
-    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=n))
+def json_error(code, msg):
+    r = jsonify(ok=False, msg=msg); r.status_code = code; return r
 
-# ───────── helpers ──────────────────────────────────────────
-def login_required(view):
-    @wraps(view)
-    def wrapped(*a, **kw):
+# ───── декораторы ─────
+def login_required(f):
+    @wraps(f)
+    def w(*a, **kw):
         if 'user_id' not in session:
-            return redirect(url_for('login'))
-        return view(*a, **kw)
-    return wrapped
+            return json_error(401, "Требуется вход")
+        return f(*a, **kw)
+    return w
 
-def admin_required(view):
-    @wraps(view)
-    def wrapped(*a, **kw):
+def admin_required(f):
+    @wraps(f)
+    def w(*a, **kw):
         if session.get('role') != 'admin':
-            flash('Требуются права администратора', 'error')
-            return redirect(url_for('dashboard'))
-        return view(*a, **kw)
-    return wrapped
+            return json_error(403, "Требуются права администратора")
+        return f(*a, **kw)
+    return w
 
-# ───────── moderator_required (модератор ИЛИ админ) ─────────
-def moderator_required(view):
-    @wraps(view)
-    def wrapped(*a, **kw):
-        role = session.get('role')
-        if role not in ('moderator', 'admin'):
-            flash('Требуются права модератора', 'error')
-            return redirect(url_for('dashboard'))
-        return view(*a, **kw)
-    return wrapped
+def moderator_required(f):
+    @wraps(f)
+    def w(*a, **kw):
+        if session.get('role') not in ('moderator', 'admin'):
+            return json_error(403, "Требуются права модератора")
+        return f(*a, **kw)
+    return w
 
-
-# ────────────────────────── sync_user before-request ──────────────────────────
+# ───── before_request ─────
 @app.before_request
 def sync_user():
-    """
-    • Если пользователь залогинен, подтягиваем его актуальную роль
-      и флаг блокировки из БД, чтобы sidebar и доступы были корректны.
-    • Если запись в БД удалена / не найдена — очищаем сессию.
-    • Для шаблонов кладём имя пользователя в g.user  (может быть None).
-    """
     uid = session.get('user_id')
-    if uid:
-        conn = get_db_connection(); cur = conn.cursor()
+    if not uid:
+        g.user = None; return
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT role,is_blocked,username FROM users WHERE user_id=%s",(uid,))
+    row = cur.fetchone()
+    if row:
+        session.update({'role':row[0],'is_blocked':row[1],'username':row[2]})
+    else:
+        session.clear()
+    cur.close(); conn.close(); g.user = session.get('username')
 
-        cur.execute("SELECT role, is_blocked, username FROM users WHERE user_id=%s", (uid,))
-        row = cur.fetchone()
+# ─── вернуть статические HTML для админки ───
+@app.route('/admin/users')
+@admin_required
+def admin_users_spa():
+    # отдадим static/admin_users.html
+    return send_from_directory(app.static_folder, 'admin_users.html')
 
-        if row:
-            session['role']       = row[0]         # 'player' / 'moderator' / 'admin'
-            session['is_blocked'] = row[1]         # True / False
-            session['username']   = row[2]
-        else:                                     # пользователь удалён
-            session.clear()
-
-        cur.close(); conn.close()
-
-    # g.user используется в base.html для отображения имени рядом с аватаркой
-    g.user = session.get('username')
+@app.route('/admin/teams')
+@admin_required
+def admin_teams_spa():
+    return send_from_directory(app.static_folder, 'admin_teams.html')
 
 
-# ───────── регистрация / вход ──────────────────────────────
+# ─── SPA-роутер (никогда не переехал) ───
+@app.route('/', defaults={'path': ''})
+@app.route('/<path:path>')
+def spa(path=''):
+    if path.startswith('api/'):
+        abort(404)
+    full = os.path.join(app.static_folder, path)
+    if path and os.path.isfile(full):
+        return send_from_directory(app.static_folder, path)
+    return send_from_directory(app.static_folder, 'index.html')
+
+# ───────────────────── AUTH ─────────────────────
 MAX_LOGIN = 32
-@app.route('/register', methods=['GET', 'POST'])
-def register():
-    error = None
-    if request.method == 'POST':
-        u, p, c = request.form['username'].strip(), request.form['password'], request.form['confirm_password']
-        if p != c:
-            error = 'Пароли не совпадают'
-        elif len(u) > MAX_LOGIN:
-            error = f'Максимальна длина логина {MAX_LOGIN}'
-        else:
-            conn = get_db_connection(); cur = conn.cursor()
-            cur.execute("SELECT 1 FROM users WHERE username=%s", (u,))
-            if cur.fetchone():
-                error = 'Такой пользователь уже существует'
-            else:
-                cur.execute("INSERT INTO users (username,password,role) VALUES (%s,%s,'player') RETURNING user_id",
-                            (u, generate_password_hash(p)))
-                session.update({'user_id':cur.fetchone()[0],'username':u,'role':'player'})
-                conn.commit(); cur.close(); conn.close()
-                return redirect(url_for('dashboard'))
-            cur.close(); conn.close()
-    return render_template('register.html', error=error)
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
-    error=None
-    if request.method == 'POST':
-        u, p = request.form['username'], request.form['password']
-        conn=get_db_connection(); cur=conn.cursor()
-        cur.execute("SELECT user_id,password,role FROM users WHERE username=%s",(u,))
-        row=cur.fetchone(); cur.close(); conn.close()
-        if row and check_password_hash(row[1], p):
-            session.update({'user_id':row[0],'username':u,'role':row[2]})
-            return redirect(url_for('dashboard'))
-        error='Неверный логин или пароль'
-    return render_template('login.html', error=error)
+@app.post('/api/auth/register')
+def api_register():
+    d = request.get_json(silent=True) or {}
+    u, p, c = d.get('username','').strip(), d.get('password',''), d.get('confirm_password','')
+    if p != c:
+        return json_error(400, "Пароли не совпадают")
+    if not u or len(u) > MAX_LOGIN:
+        return json_error(400, f"Длина логина 1-{MAX_LOGIN} символов")
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute("SELECT 1 FROM users WHERE username=%s", (u,))
+    if cur.fetchone():
+        cur.close(); conn.close()
+        return json_error(409, "Такой пользователь уже существует")
+    cur.execute("INSERT INTO users(username,password,role) VALUES(%s,%s,'player') RETURNING user_id",
+                (u, generate_password_hash(p)))
+    session.update({'user_id':cur.fetchone()[0],'username':u,'role':'player'})
+    conn.commit(); cur.close(); conn.close()
+    return jsonify(ok=True)
 
-@app.route('/logout')
+@app.post('/api/auth/login')
+def api_login():
+    d=request.get_json(silent=True) or {}
+    u,p=d.get('username',''),d.get('password','')
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute("SELECT user_id,password,role FROM users WHERE username=%s",(u,))
+    row=cur.fetchone(); cur.close(); conn.close()
+    if not row or not check_password_hash(row[1], p):
+        return json_error(401,"Неверный логин или пароль")
+    session.update({'user_id':row[0],'username':u,'role':row[2]})
+    return jsonify(ok=True)
+
+@app.post('/api/auth/logout')
 @login_required
-def logout():
+def api_logout():
     session.clear()
-    return redirect(url_for('index'))
+    return jsonify(ok=True)
 
-# ───────── главная ─────────────────────────────────────────
-# ─── dashboard (15 событий) ───
-@app.route('/dashboard')
+@app.get('/api/auth/me')
 @login_required
-def dashboard():
+def api_me():
+    return jsonify(ok=True, data={
+        'user_id'   : session['user_id'],
+        'username'  : session['username'],
+        'role'      : session['role'],
+        'is_blocked': session.get('is_blocked', False)
+    })
+
+# ───────────────────── Dashboard API (коротко) ─────────────────────
+@app.get('/api/dashboard')
+@login_required
+def api_dashboard():
     conn=get_db_connection(); cur=conn.cursor()
     cur.execute("""
         SELECT e.event_id,e.name,e.type,e.description,
@@ -149,511 +175,414 @@ def dashboard():
           JOIN teams t        ON t.team_id = et.team_id
           JOIN users u        ON u.user_id = e.created_by
          WHERE e.status='finished'
-           AND et.points=(SELECT MAX(points) FROM event_teams
-                           WHERE event_id=e.event_id)
+           AND et.points=(SELECT MAX(points) FROM event_teams WHERE event_id=e.event_id)
          GROUP BY e.event_id,t.team_name,u.username
          ORDER BY e.event_id DESC LIMIT 15
     """)
-    finished=[]
+    res=[]
     for r in cur.fetchall():
         cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC),
                               t.team_name,et.points
                          FROM event_teams et JOIN teams t USING(team_id)
                         WHERE et.event_id=%s
                         ORDER BY et.points DESC""",(r[0],))
-        finished.append({'name':r[1],'type':r[2],'description':r[3],
-                         'winner':r[4],'host':r[5],'lb':cur.fetchall()})
+        res.append({'event_id':r[0],'name':r[1],'type':r[2],'description':r[3],
+                    'winner':r[4],'host':r[5],'leaderboard':cur.fetchall()})
     cur.close(); conn.close()
-    return render_template('dashboard.html', page_title='Главная', finished=finished)
+    return jsonify(ok=True,data=res)
 
-# ─────────────────────────── user_stats ───────────────────────────
-def user_stats(uid: int) -> dict:
-    """
-    Возвращает {'total': N, 'wins': M}
-    total – количество событий, где участвовали команды игрока
-    wins  – сколько раз его команда была первой по очкам
-    """
-    conn = get_db_connection(); cur = conn.cursor()
+###############################################################################
+#  Вспомогательная current_team()
+###############################################################################
 
-    # все команды пользователя
-    cur.execute("SELECT team_id FROM team_members WHERE user_id=%s", (uid,))
-    team_ids = [r[0] for r in cur.fetchall()]
-    if not team_ids:
-        cur.close(); conn.close()
-        return {'total': 0, 'wins': 0}
+def current_team():
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute("""SELECT t.team_id,t.team_name,t.description
+                     FROM teams t JOIN team_members tm ON t.team_id=tm.team_id
+                    WHERE tm.user_id=%s AND tm.active""",(session['user_id'],))
+    row=cur.fetchone()
+    if not row:
+        cur.close(); conn.close(); return None,[]
+    cur.execute("""SELECT u.user_id,u.username,u.is_blocked
+                     FROM users u JOIN team_members tm ON tm.user_id=u.user_id
+                    WHERE tm.team_id=%s AND tm.active""",(row[0],))
+    members=[{'user_id':r[0],'username':r[1],'is_blocked':r[2]} for r in cur.fetchall()]
+    cur.close(); conn.close();
+    return {'team_id':row[0],'team_name':row[1],'description':row[2]}, members
 
-    # всего событий
-    cur.execute("""SELECT COUNT(DISTINCT event_id)
-                     FROM event_teams
-                    WHERE team_id = ANY(%s)""", (team_ids,))
-    total = cur.fetchone()[0]
+###############################################################################
+#  TEAM API (get, create, join, leave) + NEW history
+###############################################################################
 
-    # число побед (событие в статусе finished + макс. очки)
-    cur.execute("""
-        SELECT COUNT(*)
-          FROM events e
-          JOIN LATERAL (
-               SELECT et.team_id
-                 FROM event_teams et
-                WHERE et.event_id = e.event_id
-                ORDER BY et.points DESC
-                LIMIT 1
-          ) win ON TRUE
-         WHERE e.status = 'finished'
-           AND win.team_id = ANY(%s)
-    """, (team_ids,))
-    wins = cur.fetchone()[0]
-
-    cur.close(); conn.close()
-    return {'total': total, 'wins': wins}
-
-# ───────── профиль ─────────
-# ───────── профиль ─────────
-@app.route('/profile')
+@app.get('/api/team')
 @login_required
-def profile():
-    """
-    Страница профиля:
-      • имя, роль, статус (активен / заблокирован)
-      • ссылка на текущую команду
-      • формы смены пароля и удаления аккаунта
-    """
-    username = session.get('username')
-    role     = session.get('role')                 # player / moderator / admin
-    blocked  = session.get('is_blocked', False)
+def api_team_get():
+    team,members=current_team()
+    if not team:
+        return jsonify(ok=True,data=None)
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute("SELECT COUNT(DISTINCT e.event_id) FROM events e JOIN event_teams et USING(event_id) WHERE et.team_id=%s AND e.status='finished'",(team['team_id'],))
+    total=cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM events e WHERE e.status='finished' AND (SELECT MAX(points) FROM event_teams WHERE event_id=e.event_id)=(SELECT points FROM event_teams WHERE event_id=e.event_id AND team_id=%s)",(team['team_id'],))
+    wins=cur.fetchone()[0]
+    cur.close(); conn.close()
+    return jsonify(ok=True,data={'team':team,'members':members,'stats':{'total':total,'wins':wins}})
 
-    role_ru = {
-        'player'    : 'Участник',
-        'moderator' : 'Модератор',
-        'admin'     : 'Администратор'
-    }
+@app.get('/api/team/history')
+@login_required
+def api_team_history():
+    page=max(int(request.args.get('page',1)),1)
+    team,_=current_team()
+    if not team:
+        return json_error(400,'Нужно состоять в команде')
+    off=(page-1)*HIST_PER_PAGE
+    conn=get_db_connection(); cur=conn.cursor()
+    # сколько всего строк
+    cur.execute("""SELECT COUNT(*) FROM events e JOIN event_teams et USING(event_id)
+                 WHERE et.team_id=%s AND e.status='finished'""",(team['team_id'],))
+    total=cur.fetchone()[0]
+    pages=(total+HIST_PER_PAGE-1)//HIST_PER_PAGE
+    # сами данные
+    cur.execute("""SELECT e.name, TO_CHAR(NOW()::date,'DD.MM.YYYY') AS dt, et.points,
+                         (SELECT t2.team_name FROM event_teams et2 JOIN teams t2 USING(team_id)
+                           WHERE et2.event_id=e.event_id ORDER BY et2.points DESC LIMIT 1)
+                  FROM events e JOIN event_teams et USING(event_id)
+                 WHERE et.team_id=%s AND e.status='finished'
+                 ORDER BY e.event_id DESC LIMIT %s OFFSET %s""",
+                (team['team_id'], HIST_PER_PAGE, off))
+    hist=[{'name':r[0],'date':r[1],'my_pts':r[2],'winner':r[3]} for r in cur.fetchall()]
+    cur.close(); conn.close()
+    return jsonify(ok=True,data={'history':hist,'page':page,'pages':pages})
 
-    team, _ = current_team()                       # None, []  если не в команде
+@app.post('/api/team/create')
+@login_required
+def api_team_create():
+    if session.get('is_blocked'):
+        return json_error(403,'Аккаунт заблокирован')
+    d=request.get_json(silent=True) or {}
+    name=str(d.get('team_name','')).strip()[:32]
+    if len(name)<3:
+        return json_error(400,'Название слишком короткое')
+    code_raw=str(d.get('invite_code','')).strip()[:16]
+    conn=get_db_connection(); cur=conn.cursor()
+    code=code_raw if code_raw else unique_code(conn)
+    try:
+        cur.execute('INSERT INTO teams(team_name,invite_code) VALUES(%s,%s) RETURNING team_id',(name,code))
+        tid=cur.fetchone()[0]
+        cur.execute("""INSERT INTO team_members(user_id,team_id,active) VALUES(%s,%s,TRUE)
+                     ON CONFLICT (user_id) DO UPDATE SET team_id=EXCLUDED.team_id,active=TRUE""",
+                    (session['user_id'],tid))
+        conn.commit()
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback(); return json_error(409,'Имя команды или код уже заняты')
+    finally:
+        cur.close(); conn.close()
+    return jsonify(ok=True)
 
-    return render_template(
-        'profile.html',
-        page_title = 'Профиль',
+@app.post('/api/team/join')
+@login_required
+def api_team_join():
+    if session.get('is_blocked'):
+        return json_error(403,'Аккаунт заблокирован')
+    d=request.get_json(silent=True) or {}
+    code=str(d.get('invite_code','')).strip()[:16]
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute('SELECT team_id FROM teams WHERE invite_code=%s',(code,))
+    row=cur.fetchone()
+    if not row:
+        cur.close(); conn.close(); return json_error(404,'Неверный код')
+    tid=row[0]
+    cur.execute("""INSERT INTO team_members(user_id,team_id,active) VALUES(%s,%s,TRUE)
+                 ON CONFLICT (user_id) DO UPDATE SET team_id=EXCLUDED.team_id,active=TRUE""",
+                (session['user_id'],tid))
+    conn.commit(); cur.close(); conn.close();
+    return jsonify(ok=True)
 
-        # данные для шаблона
-        username   = username,
-        role       = role,                         # css-класс: player|moderator|admin
-        role_ru    = role_ru.get(role, ''),
-        is_blocked = blocked,
-        team       = team,
+@app.post('/api/team/leave')
+@login_required
+def api_team_leave():
+    conn=get_db_connection(); cur=conn.cursor()
+    cur.execute('DELETE FROM team_members WHERE user_id=%s',(session['user_id'],))
+    if cur.rowcount: conn.commit()
+    cur.close(); conn.close();
+    return jsonify(ok=True)
 
-        # сообщения смены пароля / удаления
-        pass_msg = request.args.get('pm'),
-        pass_ok  = request.args.get('ok') == '1'
+###############################################################################
+#  API: события игрока
+###############################################################################
+
+@app.get("/api/events")
+@login_required
+def api_events_get():
+    team, _ = current_team()
+    if not team:
+        return jsonify(ok=True, data={"team": None})
+
+    conn = get_db_connection(); cur = conn.cursor()
+    # текущий event
+    cur.execute(
+        """SELECT e.event_id,e.name,e.status,e.type,e.description,e.file_path
+               FROM events e JOIN event_teams et USING(event_id)
+              WHERE et.team_id=%s AND e.status IN ('waiting','running')
+              ORDER BY e.event_id DESC LIMIT 1""",
+        (team["team_id"],),
+    )
+    cur_ev = cur.fetchone()
+
+    leaderboard = []
+    if cur_ev and cur_ev[2] == "running":
+        cur.execute(
+            """SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
+                              t.team_name, et.points
+                         FROM event_teams et JOIN teams t USING(team_id)
+                        WHERE et.event_id=%s ORDER BY et.points DESC""",
+            (cur_ev[0],),
+        )
+        leaderboard = cur.fetchall()
+
+    # waiting events not joined
+    cur.execute(
+        """SELECT e.event_id,e.name,e.type,e.description,
+                      (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams_cnt
+               FROM events e
+              WHERE e.status='waiting' AND NOT EXISTS (
+                      SELECT 1 FROM event_teams WHERE event_id=e.event_id AND team_id=%s)
+              ORDER BY e.event_id DESC""",
+        (team["team_id"],),
+    )
+    waiting = cur.fetchall()
+    cur.close(); conn.close()
+
+    return jsonify(
+        ok=True,
+        data={
+            "team": team,
+            "current_event": cur_ev,
+            "leaderboard": leaderboard,
+            "waiting": waiting,
+        },
     )
 
 
-
-@app.route('/change_password', methods=['POST'])
+@app.post("/api/events/join")
 @login_required
-def change_password():
-    old,new=request.form['old'],request.form['new']
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT password FROM users WHERE user_id=%s",(session['user_id'],))
-    if check_password_hash(cur.fetchone()[0],old):
-        cur.execute("UPDATE users SET password=%s WHERE user_id=%s",
-                    (generate_password_hash(new),session['user_id']))
-        conn.commit(); msg,ok='Пароль обновлён','1'
-    else:
-        msg,ok='Старый пароль неверен','0'
-    cur.close(); conn.close()
-    return redirect(url_for('profile', pm=msg, ok=ok))
-
-@app.route('/delete_account', methods=['POST'])
-@login_required
-def delete_account():
-    pwd=request.form['pwd']
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("SELECT password FROM users WHERE user_id=%s",(session['user_id'],))
-    if check_password_hash(cur.fetchone()[0],pwd):
-        cur.execute("DELETE FROM users WHERE user_id=%s",(session['user_id'],))
-        conn.commit(); session.clear(); cur.close(); conn.close()
-        return redirect(url_for('index'))
-    cur.close(); conn.close()
-    return redirect(url_for('profile', pm='Пароль неверен', ok='0'))
-
-# ───────── команды игрока ─────────────────────────────────
-# ───────── команды игрока ─────────────────────────────────────────
-def current_team():
-    """
-    Возвращает (team_dict, members_list)
-
-    team_dict = {'team_id': .., 'team_name': .., 'description': ..}
-    members   = [{'user_id':..,'username':..,'is_blocked':True/False}, …]
-
-    Если игрок не в команде → (None, [])
-    """
+def api_events_join():
+    team, _ = current_team()
+    if not team:
+        return json_error(400, "Нужно состоять в команде")
+    data = request.get_json(silent=True) or {}
+    code = str(data.get("code")) if "code" in data else None
+    eid  = data.get("event_id")
     conn = get_db_connection(); cur = conn.cursor()
-
-    cur.execute("""
-        SELECT t.team_id,t.team_name,t.description
-          FROM teams t
-          JOIN team_members tm ON t.team_id = tm.team_id
-         WHERE tm.user_id = %s AND tm.active
-    """, (session['user_id'],))
-    row = cur.fetchone()
-
-    if not row:
-        cur.close(); conn.close()
-        return None, []
-
-    cur.execute("""
-        SELECT u.user_id,u.username,u.is_blocked
-          FROM users u
-          JOIN team_members tm ON tm.user_id = u.user_id
-         WHERE tm.team_id = %s AND tm.active
-    """, (row[0],))
-    members = [{'user_id':r[0],'username':r[1],'is_blocked':r[2]} for r in cur.fetchall()]
-
-    cur.close(); conn.close()
-    return {'team_id':row[0],'team_name':row[1],'description':row[2]}, members
-
-# ─────────────────────── /team ────────────────────────────────
-@app.route('/team')
-@login_required
-def team():
-    """
-    • без команды  → формы «Создать / Присоединиться»;
-    • с командой   → участники, статистика, история (15 строк на страницу).
-    """
-    team, members = current_team()                # (None, []) если не в команде
-    page  = max(int(request.args.get('page', 1)), 1)
-    PER   = 15
-    off   = (page - 1) * PER
-
-    stats   = {'total': 0, 'wins': 0}
-    history = []
-    pages   = 0
-
-    if team:
-        conn = get_db_connection(); cur = conn.cursor()
-
-        # ---------- статистика ----------
-        cur.execute("""
-            SELECT COUNT(DISTINCT e.event_id)
-              FROM events e
-              JOIN event_teams et USING(event_id)
-             WHERE et.team_id=%s
-               AND e.status='finished'""",
-            (team['team_id'],))
-        stats['total'] = cur.fetchone()[0]
-
-        cur.execute("""
-            SELECT COUNT(*)
-              FROM events e
-             WHERE e.status='finished'
-               AND (SELECT MAX(points) FROM event_teams
-                     WHERE event_id=e.event_id) =
-                   (SELECT points FROM event_teams
-                     WHERE event_id=e.event_id AND team_id=%s)""",
-            (team['team_id'],))
-        stats['wins'] = cur.fetchone()[0]
-
-        # ---------- сколько всего строк ----------
-        cur.execute("""
-            SELECT COUNT(*)
-              FROM events e
-              JOIN event_teams et USING(event_id)
-             WHERE et.team_id=%s
-               AND e.status='finished'""",
-            (team['team_id'],))
-        total = cur.fetchone()[0]
-        pages = (total + PER - 1) // PER
-
-        # ---------- история ----------
-        cur.execute("""
-            SELECT e.name,
-                   TO_CHAR(NOW()::date, 'DD.MM.YYYY')       AS dt,
-                   et.points,
-                   (SELECT t2.team_name
-                      FROM event_teams et2
-                      JOIN teams t2 USING(team_id)
-                     WHERE et2.event_id = e.event_id
-                     ORDER BY et2.points DESC
-                     LIMIT 1)                               AS winner
-              FROM events e
-              JOIN event_teams et USING(event_id)
-             WHERE et.team_id = %s
-               AND e.status  = 'finished'
-             ORDER BY e.event_id DESC
-             LIMIT %s OFFSET %s""",
-            (team['team_id'], PER, off))
-
-        history = [{'name'  : r[0],
-                    'date'  : r[1],          # строка «дд.мм.гггг»
-                    'my_pts': r[2],
-                    'winner': r[3]} for r in cur.fetchall()]
-        cur.close(); conn.close()
-
-    return render_template('team.html',
-                           page_title='Команда',
-                           team=team,
-                           members=members,
-                           stats=stats,
-                           history=history,
-                           page=page,
-                           pages=pages)
-
-
-
-
-# ───────── история игрока (по событиям) ─────────
-def fetch_history(cur, uid: int, limit: int, off: int):
-    """
-    Возвращает (history_list, total_rows), где history_list —
-    список словарей: {'date', 'name', 'my_team', 'winner'}
-    """
-    SQL = """
-        SELECT e.event_id,
-               e.name,
-               COALESCE(e.finished_at, NOW())        AS dt,
-               t.team_name                           AS my_team,
-               win.team_name                         AS winner
-          FROM events         e
-          JOIN event_submits  s  ON s.event_id = e.event_id
-          JOIN teams          t  ON t.team_id  = s.team_id
-          LEFT JOIN LATERAL (
-                SELECT t2.team_name
-                  FROM event_teams et2
-                  JOIN teams t2 USING(team_id)
-                 WHERE et2.event_id = e.event_id
-                 ORDER BY et2.points DESC LIMIT 1
-          ) win ON TRUE
-         WHERE s.user_id = %s
-           AND e.status  = 'finished'
-         GROUP BY e.event_id,e.name,dt,my_team,winner
-         ORDER BY e.event_id DESC
-         LIMIT %s OFFSET %s
-    """
-
+    if code:
+        cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code[:16],))
+        ev = cur.fetchone()
+        if not ev:
+            cur.close(); conn.close(); return json_error(404, "Код не найден")
+        if ev[1] != "waiting":
+            cur.close(); conn.close(); return json_error(400, "Регистрация закрыта")
+        eid = ev[0]
     try:
-        cur.execute(SQL, (uid, limit, off))
-    except psycopg2.errors.UndefinedColumn:
-        # поля finished_at нет — делаем резервную выборку без него
-        cur.connection.rollback()
-        SQL_fallback = SQL.replace("COALESCE(e.finished_at, NOW())", "NOW()")
-        cur.execute(SQL_fallback, (uid, limit, off))
-
-    rows = cur.fetchall()
-    history = [{'date': r[2], 'name': r[1],
-                'my_team': r[3], 'winner': r[4]} for r in rows]
-
-    # сколько всего событий в истории
-    cur.execute("""
-        SELECT COUNT(DISTINCT e.event_id)
-          FROM events e JOIN event_submits s ON s.event_id = e.event_id
-         WHERE s.user_id = %s AND e.status = 'finished'
-    """, (uid,))
-    total = cur.fetchone()[0]
-
-    return history, total
-
-
-# ───── вспомогательная уникальная строка для invite_code ─────
-def unique_code(conn, length=6):
-    import random, string
-    cur = conn.cursor()
-    while True:
-        code = ''.join(random.choices(string.ascii_uppercase+string.digits, k=length))
-        cur.execute("SELECT 1 FROM teams WHERE invite_code=%s", (code,))
-        if not cur.fetchone():
-            return code
-
-# ───────────────────── СОЗДАТЬ КОМАНДУ ──────────────────────
-@app.route('/create_team', methods=['POST'])
-@login_required
-def create_team():
-    if session.get('is_blocked'):
-        flash('Аккаунт заблокирован', 'modal-create-error')
-        return redirect(url_for('team'))
-
-    name = request.form['team_name'].strip()[:32]
-    if len(name) < 3:
-        flash('Название слишком короткое', 'modal-create-error')
-        return redirect(url_for('team'))
-
-    conn = get_db_connection(); cur = conn.cursor()
-    code_raw = (request.form['invite_code'] or '').strip()[:16]
-    code = code_raw if code_raw else unique_code(conn)
-
-    try:
-        cur.execute("INSERT INTO teams(team_name,invite_code) VALUES(%s,%s) RETURNING team_id",
-                    (name, code))
-        tid = cur.fetchone()[0]
-
-        # upsert: либо создаём, либо переводим пользователя в новую команду
-        cur.execute("""
-            INSERT INTO team_members(user_id, team_id, active)
-                 VALUES (%s, %s, TRUE)
-            ON CONFLICT (user_id)
-            DO UPDATE SET team_id = EXCLUDED.team_id, active = TRUE
-        """, (session['user_id'], tid))
-
+        cur.execute(
+            "INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
+            (eid, team["team_id"]),
+        )
         conn.commit()
     except psycopg2.errors.UniqueViolation:
-        conn.rollback()
-        flash('Имя команды или код уже заняты', 'modal-create-error')
+        conn.rollback()  # уже участвует – не ошибка с точки зрения клиента
     finally:
         cur.close(); conn.close()
+    return jsonify(ok=True)
 
-    return redirect(url_for('team'))
 
-
-# ──────────────────── ПРИСОЕДИНИТЬСЯ К КОМАНДЕ ───────────────────
-@app.route('/join_team', methods=['POST'])
+@app.post("/api/events/submit/<int:eid>")
 @login_required
-def join_team():
-    if session.get('is_blocked'):
-        flash('Аккаунт заблокирован', 'modal-join-error')
-        return redirect(url_for('team'))
+def api_submit_answer(eid):
+    team, _ = current_team()
+    if not team:
+        return json_error(400, "Нужно состоять в команде")
+    data = request.get_json(silent=True) or {}
+    ans = str(data.get("answer", "")).strip()
+    if not ans:
+        return json_error(400, "Пустой ответ")
 
-    code = request.form['invite_code'].strip()[:16]
     conn = get_db_connection(); cur = conn.cursor()
-
-    cur.execute("SELECT team_id FROM teams WHERE invite_code=%s", (code,))
+    cur.execute("SELECT answer,status FROM events WHERE event_id=%s", (eid,))
     row = cur.fetchone()
     if not row:
-        flash('Неверный код', 'modal-join-error')
-    else:
-        tid = row[0]
-        cur.execute("""
-            INSERT INTO team_members(user_id, team_id, active)
-                 VALUES (%s, %s, TRUE)
-            ON CONFLICT (user_id)
-            DO UPDATE SET team_id = EXCLUDED.team_id, active = TRUE
-        """, (session['user_id'], tid))
-        conn.commit()
+        cur.close(); conn.close(); return json_error(404, "Событие не найдено")
+    correct, status = row
+    if status != "running":
+        cur.close(); conn.close(); return json_error(400, "Приём ответов закрыт")
+    cur.execute(
+        "INSERT INTO event_submits(event_id,team_id,user_id,answer) VALUES(%s,%s,%s,%s)",
+        (eid, team["team_id"], session["user_id"], ans),
+    )
+    if ans.lower() == correct.lower():
+        cur.execute(
+            "UPDATE event_teams SET points=points+1 WHERE event_id=%s AND team_id=%s",
+            (eid, team["team_id"]),
+        )
+    conn.commit(); cur.close(); conn.close()
+    return jsonify(ok=True)
 
-    cur.close(); conn.close()
-    return redirect(url_for('team'))
+###############################################################################
+#  API: модератор – создать событие
+###############################################################################
 
-
-
-
-# ───────── покинуть команду ─────────
-@app.route('/leave_team', methods=['POST'])
-@login_required
-def leave_team():
-    conn = get_db_connection(); cur = conn.cursor()
-
-    # удаляем строку; rowcount – сколько строк затронуто
-    cur.execute("DELETE FROM team_members WHERE user_id=%s", (session['user_id'],))
-    if cur.rowcount:
-        conn.commit()
-        flash('Команда покинута')
-    else:
-        flash('Вы не состоите в команде', 'error')
-
-    cur.close(); conn.close()
-    return redirect(url_for('team'))
-
-
-
-# ───────── админ таблицы ─────────────────────────────────
-PER_PAGE=10
-
-def paginated(sql_count, sql_rows, params, page):
+@app.get('/api/mod/events')
+@moderator_required
+def api_mod_active():
+    """Возвращает список событий со статусом waiting или running."""
     conn=get_db_connection(); cur=conn.cursor()
-    cur.execute(sql_count, params); total=cur.fetchone()[0]
-    pages=(total+PER_PAGE-1)//PER_PAGE
-    cur.execute(sql_rows, params+[PER_PAGE,(page-1)*PER_PAGE])
-    rows=cur.fetchall(); cur.close(); conn.close()
-    return rows,pages,total
+    cur.execute("""SELECT e.code,e.name,e.type,e.status,
+                       (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams,
+                       e.description
+                  FROM events e
+                 WHERE e.status IN ('waiting','running')
+                 ORDER BY e.event_id DESC""")
+    data=[{
+        'code':r[0],'name':r[1],'type':r[2],'status':r[3],'teams':r[4],'description':r[5]
+    } for r in cur.fetchall()]
+    cur.close(); conn.close();
+    return jsonify(ok=True,data=data)
 
-@app.route('/admin/users')
+###############################################################################
+#  API: модератор – управление событием
+###############################################################################
+
+@app.get("/api/mod/events/<code>")
+@moderator_required
+def api_mod_manage_get(code):
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
+    ev = cur.fetchone()
+    if not ev:
+        cur.close(); conn.close(); return json_error(404, "Событие не найдено")
+    eid = ev[0]
+    cur.execute(
+        """SELECT et.team_id,t.team_name,et.points,
+                 COALESCE(ls.answer,''),COALESCE(TO_CHAR(ls.ts,'HH24:MI:SS'),'—')
+          FROM event_teams et JOIN teams t USING(team_id)
+          LEFT JOIN LATERAL (
+                SELECT answer,ts FROM event_submits s
+                 WHERE s.team_id=et.team_id AND s.event_id=et.event_id
+                 ORDER BY ts DESC LIMIT 1) ls ON TRUE
+         WHERE et.event_id=%s ORDER BY et.id""",
+        (eid,),
+    )
+    teams = cur.fetchall()
+    cur.close(); conn.close()
+    return jsonify(ok=True, data={"event": ev, "teams": teams})
+
+
+@app.patch("/api/mod/events/<code>")
+@moderator_required
+def api_mod_manage_patch(code):
+    data = request.get_json(silent=True) or {}
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code,))
+    ev = cur.fetchone()
+    if not ev:
+        cur.close(); conn.close(); return json_error(404, "Событие не найдено")
+    eid, status = ev
+
+    if "start" in data and status == "waiting":
+        cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
+    elif "finish" in data and status != "finished":
+        cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
+    elif "delta" in data and status != "finished":
+        delta = int(data["delta"])
+        tid   = int(data.get("team_id"))
+        cur.execute(
+            "UPDATE event_teams SET points=GREATEST(points+%s,0) WHERE event_id=%s AND team_id=%s",
+            (delta, eid, tid),
+        )
+    elif "dq" in data and status != "finished":
+        tid = int(data.get("team_id"))
+        cur.execute(
+            "DELETE FROM event_teams WHERE event_id=%s AND team_id=%s", (eid, tid)
+        )
+    else:
+        cur.close(); conn.close(); return json_error(400, "Неверная операция")
+
+    conn.commit(); cur.close(); conn.close()
+    return jsonify(ok=True)
+
+###############################################################################
+#  API: админ – пользователи
+###############################################################################
+
+# ─────────────────── /api/admin/users ──────────────────────────
+@app.get('/api/admin/users')
 @admin_required
-def admin_users():
+def api_admin_users():
     page  = max(int(request.args.get('page', 1)), 1)
     q     = request.args.get('q', '').strip()
     sort  = request.args.get('sort', 'user_id')
     order = request.args.get('dir',  'asc')
 
-    # ――― разрешённые поля сортировки ―――
-    allowed = {'user_id', 'username', 'role', 'is_blocked'}
-    if sort not in allowed:
+    if sort not in {'user_id','username','role','is_blocked'}:
         sort = 'user_id'
-    dir_sql = 'ASC' if order == 'asc' else 'DESC'
+    dir_sql = 'ASC' if order=='asc' else 'DESC'
 
-    base_from = """
-        FROM users u
-        LEFT JOIN team_members tm ON tm.user_id = u.user_id AND tm.active
-        LEFT JOIN teams t         ON t.team_id  = tm.team_id
-    """
-
+    # Базовый FROM
+    base_from = "FROM users u"
     where, params = '', []
+
     if q:
-        where = """WHERE CAST(u.user_id AS TEXT) ILIKE %s
-                      OR u.username ILIKE %s
-                      OR CAST(t.team_id AS TEXT) ILIKE %s"""
-        params = [f'%{q}%'] * 3
+        where = """
+          WHERE CAST(u.user_id AS TEXT) ILIKE %s
+             OR u.username ILIKE %s
+             OR EXISTS (
+                 SELECT 1 FROM team_members tm2
+                  WHERE tm2.user_id = u.user_id
+                    AND CAST(tm2.team_id AS TEXT) ILIKE %s
+             )
+        """
+        params = [f'%{q}%', f'%{q}%', f'%{q}%']
 
-    sql_count = f"SELECT COUNT(DISTINCT u.user_id) {base_from} {where}"
+    sql_count = f"SELECT COUNT(*) {base_from} {where}"
 
+    # LATERAL для отображения текущей команды
     sql_rows = f"""
         SELECT u.user_id,
                u.username,
-               COALESCE(t.team_name||' ('||t.team_id||')','—') AS team,
+               COALESCE(l.team,'—') AS team,
                u.role,
                u.is_blocked
-          {base_from} {where}
-         GROUP BY u.user_id, u.username, u.role, u.is_blocked, t.team_name, t.team_id
+          FROM users u
+          LEFT JOIN LATERAL (
+            SELECT t.team_name||' ('||t.team_id||')' AS team
+              FROM team_members tm
+              JOIN teams t USING(team_id)
+             WHERE tm.user_id = u.user_id AND tm.active
+             LIMIT 1
+          ) l ON TRUE
+         {where}
          ORDER BY {sort} {dir_sql}, u.user_id
          LIMIT %s OFFSET %s
     """
 
-    PER_PAGE     = 10
-    params_rows  = params + [PER_PAGE, (page-1)*PER_PAGE]
-
     conn = get_db_connection(); cur = conn.cursor()
-    cur.execute(sql_count, params);      total  = cur.fetchone()[0]
-    cur.execute(sql_rows , params_rows); users  = cur.fetchall()
+    cur.execute(sql_count, params)
+    total = cur.fetchone()[0]
+    cur.execute(sql_rows, params + [PER_PAGE, (page-1)*PER_PAGE])
+    users = [list(r) for r in cur.fetchall()]
     cur.close(); conn.close()
 
-    pages = (total + PER_PAGE - 1) // PER_PAGE
-    return render_template('admin_users.html',
-                           page_title='Пользователи',
-                           users=users, q=q,
-                           page=page, pages=pages,
-                           sort=sort, order=order)
+    pages = (total + PER_PAGE - 1)//PER_PAGE
+    return jsonify(ok=True, data={'users':users,'page':page,'pages':pages})
 
-
-
-@app.route('/admin/teams')
+# ---------- POST /api/admin/user_action ----------
+@app.post('/api/admin/user_action')
 @admin_required
-def admin_teams():
-    page=max(int(request.args.get('page',1)),1); q=request.args.get('q','').strip()
-    sort=request.args.get('sort','team_id'); order=request.args.get('dir','asc')
-    if sort not in {'team_id','team_name','members'}: sort='team_id'
-    dir_sql='ASC' if order=='asc' else 'DESC'
+def api_admin_user_action():
+    d=request.get_json(silent=True) or {}
+    uid, act = d.get('uid'), d.get('act')
+    if not uid or act not in {'delete','moder','toggle'}:
+        return json_error(400,'bad params')
 
-    base_from="""FROM teams t LEFT JOIN team_members tm ON tm.team_id=t.team_id"""
-    where=''; params=[]
-    if q:
-        where=("WHERE CAST(t.team_id AS TEXT) ILIKE %s OR t.team_name ILIKE %s OR CAST(tm.user_id AS TEXT) ILIKE %s")
-        params=[f'%{q}%']*3
-
-    sql_count=f"SELECT COUNT(DISTINCT t.team_id) {base_from} {where}"
-    sql_rows =f"""SELECT t.team_id,t.team_name,
-                         COALESCE(string_agg(tm.user_id::TEXT,', '),'') AS member_ids,
-                         COUNT(tm.user_id) AS members
-                  {base_from} {where}
-                  GROUP BY t.team_id
-                  ORDER BY {sort} {dir_sql}
-                  LIMIT %s OFFSET %s"""
-    teams,pages,_=paginated(sql_count,sql_rows,params,page)
-    return render_template('admin_teams.html',page_title='Команды',
-                           teams=teams,page=page,pages=pages,q=q,
-                           sort=sort,order=order)
-
-# ───────── админ действия ───────────────────────────────
-@app.route('/admin/user_action', methods=['POST'])
-@admin_required
-def admin_user_action():
-    uid,act=request.form['uid'],request.form['act']
     conn=get_db_connection(); cur=conn.cursor()
     if act=='delete':
         cur.execute("DELETE FROM users WHERE user_id=%s",(uid,))
@@ -663,392 +592,101 @@ def admin_user_action():
     elif act=='toggle':
         cur.execute("UPDATE users SET is_blocked=NOT is_blocked WHERE user_id=%s",(uid,))
     conn.commit(); cur.close(); conn.close()
-    if not session: return redirect(url_for('index'))
-    return redirect(request.referrer or url_for('admin_users'))
+    return jsonify(ok=True)
 
-
-@app.route('/admin/team_action', methods=['POST'])
+# ---------- GET /api/admin/teams ----------
+# ─────────────────── /api/admin/teams ──────────────────────────
+@app.get('/api/admin/teams')
 @admin_required
-def admin_team_action():
-    tid      = request.form.get('tid')
-    act      = request.form.get('act')
-    kick_uid = request.form.get('kick_uid')
+def api_admin_teams():
+    page  = max(int(request.args.get('page', 1)), 1)
+    q     = request.args.get('q', '').strip()
+    sort  = request.args.get('sort', 'team_id')
+    order = request.args.get('dir',  'asc')
+    if sort not in {'team_id','team_name','members'}:
+        sort = 'team_id'
+    dir_sql = 'ASC' if order == 'asc' else 'DESC'
 
-    # если дисквалификация — проверяем формат и наличие участника
-    if act == 'kick':
-        # формат: положительное целое
-        if not kick_uid or not re.fullmatch(r'[1-9]\d*', kick_uid):
-            session['kick_error_tid'] = tid
-            return redirect(request.referrer or url_for('admin_teams'))
+    # убираем прямое JOIN по team_members, ищем через EXISTS
+    base_from = "FROM teams t"
+    where, params = '', []
+    if q:
+        where = """
+          WHERE CAST(t.team_id AS TEXT) ILIKE %s
+             OR t.team_name ILIKE %s
+             OR EXISTS (
+                 SELECT 1 FROM team_members tm2
+                  WHERE tm2.team_id = t.team_id
+                    AND CAST(tm2.user_id AS TEXT) ILIKE %s
+             )
+        """
+        params = [f'%{q}%', f'%{q}%', f'%{q}%']
 
-        conn = get_db_connection()
-        cur  = conn.cursor()
-        # проверяем, что такой активный участник есть
-        cur.execute("""
-            SELECT 1
-              FROM team_members
-             WHERE team_id = %s
-               AND user_id = %s
-               AND active = TRUE
-        """, (tid, kick_uid))
-        if not cur.fetchone():
-            cur.close()
-            conn.close()
-            session['kick_error_tid'] = tid
-            return redirect(request.referrer or url_for('admin_teams'))
+    sql_count = f"SELECT COUNT(DISTINCT t.team_id) {base_from} {where}"
 
-        # всё ок — удаляем
-        cur.execute(
-            "DELETE FROM team_members WHERE team_id = %s AND user_id = %s",
-            (tid, kick_uid)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-        return redirect(request.referrer or url_for('admin_teams'))
+    sql_rows = f"""
+        SELECT t.team_id,
+               t.team_name,
+               COALESCE(m.member_ids,'') AS member_ids,
+               COALESCE(m.members,0)    AS members
+          FROM teams t
+          LEFT JOIN LATERAL (
+            SELECT string_agg(tm.user_id::TEXT, ', ') AS member_ids,
+                   COUNT(*)                           AS members
+              FROM team_members tm
+             WHERE tm.team_id = t.team_id
+          ) m ON TRUE
+         {where}
+         ORDER BY {sort} {dir_sql}
+         LIMIT %s OFFSET %s
+    """
 
-    # остальные действия
     conn = get_db_connection(); cur = conn.cursor()
-    if act == 'delete':
-        cur.execute("DELETE FROM teams WHERE team_id = %s", (tid,))
-    elif act == 'disband':
-        cur.execute("DELETE FROM team_members WHERE team_id = %s", (tid,))
+    cur.execute(sql_count, params)
+    total = cur.fetchone()[0]
+    cur.execute(sql_rows, params + [PER_PAGE, (page-1)*PER_PAGE])
+    teams = [list(r) for r in cur.fetchall()]
+    cur.close(); conn.close()
+
+    pages = (total + PER_PAGE - 1)//PER_PAGE
+    return jsonify(ok=True, data={'teams':teams,'page':page,'pages':pages})
+
+# ---------- POST /api/admin/team_action ----------
+@app.post('/api/admin/team_action')
+@admin_required
+def api_admin_team_action():
+    d=request.get_json(silent=True) or {}
+    tid, act = d.get('tid'), d.get('act')
+    if not tid or act not in {'delete','disband','kick'}:
+        return json_error(400,'bad params')
+
+    conn=get_db_connection(); cur=conn.cursor()
+    if act=='delete':
+        cur.execute("DELETE FROM teams WHERE team_id=%s",(tid,))
+    elif act=='disband':
+        cur.execute("DELETE FROM team_members WHERE team_id=%s",(tid,))
+    elif act=='kick':
+        uid=d.get('kick_uid')
+        if not uid: cur.close(); conn.close(); return json_error(400,'kick_uid?')
+        cur.execute("DELETE FROM team_members WHERE team_id=%s AND user_id=%s",(tid,uid))
     conn.commit(); cur.close(); conn.close()
+    return jsonify(ok=True)
 
-    return redirect(request.referrer or url_for('admin_teams'))
+###############################################################################
+#  Вспомогательные
+###############################################################################
 
+def unique_code(conn, length: int = 6) -> str:
+    cur = conn.cursor()
+    while True:
+        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
+        cur.execute("SELECT 1 FROM teams WHERE invite_code=%s", (code,))
+        if not cur.fetchone():
+            return code
 
-# ───────────────── EVENTS (игрок) ─────────────────
+###############################################################################
+#  Запуск
+###############################################################################
 
-def team_has_blocked(team_id, cur) -> bool:
-    cur.execute("""
-        SELECT 1
-          FROM team_members tm
-          JOIN users u ON u.user_id = tm.user_id
-         WHERE tm.team_id = %s AND u.is_blocked
-         LIMIT 1
-    """, (team_id,))
-    return cur.fetchone() is not None
-
-
-# ───────────────── EVENTS (игрок) ───────────────────────────────
-@app.route('/events', methods=['GET', 'POST'])
-@login_required
-def events():
-    team, _ = current_team()
-    if not team:
-        flash('Нужно состоять в команде', 'error')
-        return render_template('events.html', team=None, page_title='События')
-
-    conn = get_db_connection(); cur = conn.cursor()
-
-    # ---------- POST ----------
-    if request.method == 'POST':
-        # 1) присоединение по коду
-        if 'code' in request.form:
-            code = request.form['code'][:16]
-            cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code,))
-            ev = cur.fetchone()
-            if not ev:
-                flash('Код не найден', 'modal-join-error')
-            elif ev[1] != 'waiting':
-                flash('Регистрация закрыта', 'modal-join-error')
-            else:
-                try:
-                    cur.execute("""INSERT INTO event_teams(event_id,team_id)
-                                   VALUES(%s,%s)""",
-                                (ev[0], team['team_id']))
-                    conn.commit()
-                except psycopg2.errors.UniqueViolation:
-                    conn.rollback(); flash('Команда уже участвует','modal-join-error')
-
-        # 2) «Участвовать» из карточки
-        elif 'join_event' in request.form:
-            eid = request.form['join_event']
-            try:
-                cur.execute("""INSERT INTO event_teams(event_id,team_id)
-                               VALUES(%s,%s)""", (eid, team['team_id']))
-                conn.commit()
-            except psycopg2.errors.UniqueViolation:
-                conn.rollback()
-
-        cur.close(); conn.close()
-        return redirect(url_for('events'))          # PRG-паттерн
-
-    # ---------- GET ----------
-    # 1) активное событие (waiting / running)
-    cur.execute("""
-        SELECT e.event_id,e.name,e.status,e.type,e.description,e.file_path
-          FROM events e
-          JOIN event_teams et USING(event_id)
-         WHERE et.team_id=%s AND e.status IN ('waiting','running')
-         ORDER BY e.event_id DESC LIMIT 1
-    """, (team['team_id'],))
-    cur_ev = cur.fetchone()
-
-    leaderboard = []
-    if cur_ev and cur_ev[2] == 'running':
-        cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC),
-                              t.team_name, et.points
-                         FROM event_teams et
-                         JOIN teams t USING(team_id)
-                        WHERE et.event_id=%s
-                        ORDER BY et.points DESC""",
-                    (cur_ev[0],))
-        leaderboard = cur.fetchall()
-
-    # 2) последнее завершённое событие команды
-    cur.execute("""
-        SELECT e.event_id,e.name,e.type,e.description
-          FROM events e
-          JOIN event_teams et USING(event_id)
-         WHERE et.team_id=%s AND e.status='finished'
-         ORDER BY e.event_id DESC LIMIT 1
-    """, (team['team_id'],))
-    last_ev = cur.fetchone()
-
-    finished_lb = []; winner = None
-    if last_ev:
-        cur.execute("""SELECT ROW_NUMBER() OVER(ORDER BY points DESC),
-                              t.team_name, et.points
-                         FROM event_teams et
-                         JOIN teams t USING(team_id)
-                        WHERE et.event_id=%s
-                        ORDER BY et.points DESC""",
-                    (last_ev[0],))
-        finished_lb = cur.fetchall()
-        if finished_lb:
-            winner = finished_lb[0][1]
-
-    # 3) waiting-события, куда команда ещё не записана
-    cur.execute("""
-        SELECT e.event_id,e.name,e.type,e.description,
-               (SELECT COUNT(*) FROM event_teams et
-                 WHERE et.event_id=e.event_id)     AS teams_cnt
-          FROM events e
-         WHERE e.status='waiting'
-           AND NOT EXISTS (SELECT 1 FROM event_teams
-                            WHERE event_id=e.event_id
-                              AND team_id=%s)
-         ORDER BY e.event_id DESC
-    """, (team['team_id'],))
-    waiting = cur.fetchall()
-
-    cur.close(); conn.close()
-
-    return render_template('events.html',
-                           page_title='События',
-                           team=team,
-                           cur_ev=cur_ev,
-                           leaderboard=leaderboard,
-                           waiting=waiting,
-                           last_ev=last_ev,
-                           finished_lb=finished_lb,
-                           winner=winner)
-
-
-
-
-@app.route('/submit_answer/<int:eid>', methods=['POST'])
-@login_required
-def submit_answer(eid):
-    team, _ = current_team()
-    if not team:
-        flash('Нужно состоять в команде', 'error')
-        return redirect(url_for('events'))
-
-    ans = request.form['answer'].strip()
-    conn = get_db_connection(); cur = conn.cursor()
-
-    # проверяем статус
-    cur.execute("SELECT answer, status FROM events WHERE event_id=%s", (eid,))
-    row = cur.fetchone()
-    if not row:
-        flash('Событие не найдено', 'error')
-        cur.close(); conn.close()
-        return redirect(url_for('events'))
-
-    correct, status = row
-    if status != 'running':
-        flash('Приём ответов закрыт', 'error')
-    else:
-        # ── фиксируем попытку игрока с user_id  ──
-        cur.execute("""INSERT INTO event_submits(event_id, team_id, user_id, answer)
-                       VALUES (%s, %s, %s, %s)""",
-                    (eid, team['team_id'], session['user_id'], ans))
-
-        # правильный ответ → +1 очко
-        if ans.lower() == correct.lower():
-            cur.execute("""UPDATE event_teams
-                             SET points = points + 1
-                           WHERE event_id=%s AND team_id=%s""",
-                        (eid, team['team_id']))
-        conn.commit()
-        flash('Ответ отправлен')
-
-    cur.close(); conn.close()
-    return redirect(url_for('events'))
-
-# ─────────────────── СОЗДАТЬ СОБЫТИЕ (модератор) ───────────────────
-@app.route('/mod/create', methods=['GET', 'POST'])
-@moderator_required
-def mod_create():
-    """
-    Создание события. Всегда возвращает HTML-страницу.
-    После успешной вставки выводит сообщение + ссылку «Перейти к проведению».
-    """
-    msg = link = None                    # ← по умолчанию ничего
-
-    if request.method == 'POST':
-        # ---------- чтение формы ----------
-        code    = request.form['code'][:16] or random_code()
-        name    = request.form['name'][:64]
-        desc    = request.form['desc']
-        ev_type = request.form['ev_type']          # quiz / ctf
-        answer  = request.form['answer'].strip()
-        pdf     = request.files.get('task')
-
-        # ---------- валидация ----------
-        if not pdf or not pdf.filename.lower().endswith('.pdf'):
-            msg = 'Нужен PDF-файл'
-        else:
-            # сохраняем pdf в static/tasks/
-            filename = secure_filename(pdf.filename)
-            rel_path = os.path.join('tasks', filename)
-            abs_path = os.path.join(app.static_folder, rel_path)
-            pdf.save(abs_path)
-
-            # ---------- запись в БД ----------
-            conn = get_db_connection(); cur = conn.cursor()
-            try:
-                cur.execute("""
-                    INSERT INTO events(code,name,description,type,answer,file_path,created_by)
-                    VALUES (%s,%s,%s,%s,%s,%s,%s)
-                    RETURNING code,name
-                """, (code, name, desc, ev_type, answer, rel_path, session['user_id']))
-                code_ret, name_ret = cur.fetchone()
-                conn.commit()
-
-                # сообщение + ссылка
-                msg  = f'Событие «{ name_ret }» создано.'
-                link = url_for('mod_manage', code=code_ret)
-
-            except psycopg2.errors.UniqueViolation:
-                conn.rollback()
-                msg = 'Код события уже занят'
-            finally:
-                cur.close(); conn.close()
-
-    # ---------- всегда возвращаем шаблон ----------
-    return render_template('mod_create.html',
-                           page_title='Создать событие',
-                           msg=msg,
-                           link=link)
-
-
-# ─────────────────────────── ПРОВЕДЕНИЕ СОБЫТИЯ (модератор) ──────────────────
-@app.route('/mod/manage', methods=['GET', 'POST'])
-@moderator_required
-def mod_manage():
-    code = request.values.get('code', '').strip()[:16]
-    ev = teams = None
-    active_events = []
-
-    conn = get_db_connection(); cur = conn.cursor()
-
-    if request.method == 'POST':
-        cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
-        ev = cur.fetchone()
-        if ev:
-            eid, _, status = ev
-
-            try:
-                # старт / финиш
-                if 'start' in request.form and status == 'waiting':
-                    cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
-                elif 'finish' in request.form and status != 'finished':
-                    cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
-
-                # дисквалификация
-                elif request.form.get('dq') and status != 'finished':
-                    cur.execute(
-                        "DELETE FROM event_teams WHERE event_id=%s AND team_id=%s",
-                        (eid, int(request.form['tid']))
-                    )
-
-                # добавление/вычитание очков
-                elif request.form.get('delta') and status != 'finished':
-                    cur.execute(
-                        """
-                        UPDATE event_teams
-                           SET points = GREATEST(points + %s, 0)
-                         WHERE event_id=%s AND team_id=%s
-                        """,
-                        (int(request.form['delta']), eid, int(request.form['tid']))
-                    )
-
-                conn.commit()
-            except NumericValueOutOfRange:
-                conn.rollback()
-                flash('Слишком большое число очков', 'error')
-            except Exception as e:
-                conn.rollback()
-                flash(f'Ошибка: {e}', 'error')
-
-        cur.close(); conn.close()
-        return redirect(url_for('mod_manage', code=code))
-
-    # GET: если ввели код — показываем команды в событии
-    if code:
-        cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
-        ev = cur.fetchone()
-        if ev:
-            eid = ev[0]
-            cur.execute("""
-                SELECT et.team_id,
-                       t.team_name,
-                       et.points,
-                       COALESCE(ls.answer,'')                    AS last_answer,
-                       COALESCE(TO_CHAR(ls.ts,'HH24:MI:SS'),'—') AS last_ts
-                  FROM event_teams et
-                  JOIN teams t USING(team_id)
-                  LEFT JOIN LATERAL (
-                        SELECT answer, ts
-                          FROM event_submits s
-                         WHERE s.team_id = et.team_id
-                           AND s.event_id = et.event_id
-                         ORDER BY ts DESC
-                         LIMIT 1
-                  ) ls ON TRUE
-                 WHERE et.event_id=%s
-                 ORDER BY et.id
-            """, (eid,))
-            teams = cur.fetchall()
-    else:
-        # список ожидающих и идущих
-        cur.execute("""
-            SELECT code, name, description, type, status,
-                   (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams_cnt
-              FROM events e
-             WHERE e.status IN ('waiting','running')
-             ORDER BY e.event_id DESC
-        """)
-        active_events = cur.fetchall()
-
-    cur.close(); conn.close()
-
-    return render_template(
-        'mod_manage.html',
-        page_title='Проведение события',
-        ev=ev,
-        teams=teams,
-        code_entered=code,
-        active_events=active_events
-    )
-
-# ───────── index ────────────────────────────────────────
-@app.route('/')
-def index():
-    return redirect(url_for('dashboard')) if g.user else render_template('index.html')
-
-if __name__=='__main__': app.run(debug=True)
+if __name__ == '__main__':
+    app.run(debug=True, host='0.0.0.0', port=5000)

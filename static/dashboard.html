@@ -1,0 +1,75 @@
+<!DOCTYPE html><html lang="ru"><head>
+  <meta charset="UTF-8"><title>Главная</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/css/style.css"></head><body>
+  
+  <nav class="sidebar"><div class="logo">IB Competition</div><div id="navLinks"></div></nav>
+  <header class="topbar"><div class="top-title">Главная</div>
+    <div class="avatar-menu"><span id="uname"></span>
+      <img src="/static/default-avatar.png" class="avatar" id="aBtn">
+      <div class="dropdown" id="dd"><a href="/profile.html">Профиль</a><a href="#" id="lo">Выйти</a></div></div>
+  </header>
+  
+  <main>
+    <h1 style="text-align:center;margin:20px 0">IB Competition</h1>
+    <section class="content-box" style="max-width:900px;margin:auto">
+      <p>Добро пожаловать … Ниже — 15 последних завершённых событий.</p>
+    </section>
+  
+    <h2 id="noev" style="margin-top:36px;display:none">Завершённых событий пока нет.</h2>
+    <div class="card-grid" id="evGrid"></div>
+  </main>
+  
+  <script type="module">
+  import { initCommon } from '/static/js/common.js';
+  await initCommon('Главная');
+  
+  /* helper */
+  const html = s => { const t=document.createElement('template');t.innerHTML=s.trim();return t.content.firstChild; };
+  
+  const res = await fetch('/api/dashboard',{credentials:'include'});
+  const data = (await res.json()).data;
+  if(!data.length) document.getElementById('noev').style.display='block';
+  
+  const grid=document.getElementById('evGrid');
+  data.forEach(ev=>{
+    const card=html(`<div class="card"><h4>${ev.name}</h4>
+        <p>Тип: ${ev.type.toUpperCase()}</p><p>${ev.description}</p>
+        <p>Победитель: <strong>${ev.winner}</strong></p>
+        <button class="btn">Подробнее</button></div>`);
+    const dlg=html(`<div class="modal"><div class="modal-body">
+        <h3 style="margin-top:0">${ev.name}</h3><p>${ev.description}</p>
+        <p><strong>Тип:</strong> ${ev.type.toUpperCase()}</p>
+        <h4 style="margin:14px 0 6px">Лидерборд</h4>
+        <table class="admin-table"><thead><tr><th>#</th><th>Команда</th><th>Очки</th></tr></thead><tbody></tbody></table>
+        <p style="margin-top:12px"><strong>Победитель:</strong> ${ev.winner}</p>
+        <p><strong>Проводящий:</strong> ${ev.host}</p>
+        <button class="btn close-btn">Закрыть</button></div></div>`);
+    ev.leaderboard.forEach(r=>{
+      dlg.querySelector('tbody').appendChild(
+        html(`<tr${r[1]===ev.winner?' style="background:#e1f7ee"':''}>
+                <td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`));
+    });
+    card.querySelector('.btn').onclick=()=>dlg.style.display='flex';
+    dlg.querySelector('.close-btn').onclick=()=>dlg.style.display='none';
+    dlg.onclick=e=>{if(e.target===dlg)dlg.style.display='none';};
+    document.body.appendChild(dlg); grid.appendChild(card);
+  });
+  </script>
+  
+  <style>
+  .content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+  .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:16px}
+  .card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+  .card h4{margin:0 0 6px}
+  .btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer;margin-top:6px}
+  .admin-table{border-collapse:collapse;width:100%}
+  .admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
+  .admin-table thead{background:#f0f6fa;font-weight:600}
+  .modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999;
+         align-items:center;justify-content:center;padding:20px}
+  .modal-body{max-width:420px;width:100%;background:#fff;border-radius:8px;
+              padding:22px;box-shadow:0 4px 12px rgba(0,0,0,.25);overflow:auto}
+  </style>
+  </body></html>
+  

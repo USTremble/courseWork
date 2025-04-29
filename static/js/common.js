@@ -1,0 +1,55 @@
+/* /static/js/common.js  — навбар, аватар, роль */
+const $ = q => document.querySelector(q);
+
+/* avatar-menu */
+document.addEventListener('DOMContentLoaded', () => {
+  $('#aBtn')?.addEventListener('click', e => {
+    e.stopPropagation(); $('#dd').classList.toggle('show');
+  });
+  document.addEventListener('click', () => $('#dd')?.classList.remove('show'));
+  $('#lo')?.addEventListener('click', async e => {
+    e.preventDefault();
+    await fetch('/api/auth/logout', {method:'POST', credentials:'include'});
+    location.replace('/login.html');
+  });
+});
+
+export async function initCommon(pageTitle='') {
+  const r = await fetch('/api/auth/me', {credentials:'include'});
+  if (!r.ok) { location.replace('/login.html'); return null; }
+  const me = (await r.json()).data;
+  $('#uname').textContent = me.username;
+  if (pageTitle) $('.top-title').textContent = pageTitle;
+  renderSidebar(me.role);
+  return me;
+}
+
+function renderSidebar(role='player') {
+  const nav = $('#navLinks'); nav.innerHTML='';
+  const items = [
+    {href:'/dashboard.html', label:'Главная'},
+    {href:'/team.html',      label:'Команда'},
+    {href:'/events.html',    label:'События'},
+    {href:'/profile.html',   label:'Профиль'}
+  ];
+  if (role==='admin') {
+    items.push({header:true}, // Изменено здесь
+               {href:'/admin_users.html', label:'Пользователи'},
+               {href:'/admin_teams.html', label:'Команды'});
+  }
+  if (role==='admin'||role==='moderator') {
+    items.push({header:true}, // Изменено здесь
+               {href:'/mod_create.html', label:'Создать событие'},
+               {href:'/mod_manage.html', label:'Проведение'});
+  }
+  items.forEach(it=>{
+    if(it.header){
+      nav.insertAdjacentHTML('beforeend',`<div class="nav-head"></div>`); // Убрано ${it.header}
+    }else{
+      nav.insertAdjacentHTML('beforeend',
+        `<a href="${it.href}" class="nav-link${location.pathname===it.href?' active':''}">
+           ${it.label}
+         </a>`);
+    }
+  });
+}

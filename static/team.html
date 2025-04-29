@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Команда</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<nav class="sidebar">
+  <div class="logo">IB Competition</div>
+  <div id="navLinks"></div>
+</nav>
+
+<header class="topbar">
+  <div class="top-title">Команда</div>
+  <div class="avatar-menu">
+    <span id="uname"></span>
+    <img src="/static/default-avatar.png" class="avatar" id="aBtn">
+    <div class="dropdown" id="dd">
+      <a href="/profile.html">Профиль</a>
+      <a href="#" id="lo">Выйти</a>
+    </div>
+  </div>
+</header>
+
+<main style="padding-bottom:60px">
+  <h1>Команда</h1>
+  <div id="root"></div>
+</main>
+
+<script type="module">
+import { initCommon } from '/static/js/common.js';
+await initCommon('Команда');
+
+const html=s=>{const t=document.createElement('template');t.innerHTML=s.trim();return t.content.firstChild;};
+const qs=new URLSearchParams(location.search); let page=Math.max(parseInt(qs.get('page')||'1'),1);
+
+async function load(){
+  const r=await fetch('/api/team?page='+page,{credentials:'include'});
+  const data=(await r.json()).data;
+  const root=document.getElementById('root'); root.innerHTML='';
+  if(!data||!data.team){
+    root.appendChild(html(`<div class="content-box" style="max-width:420px">
+      <h3>Создать команду</h3>
+      <form id="cForm" style="margin-bottom:18px">
+        <input name="team_name" required placeholder="Название (≥3)" style="padding:6px 8px;width:100%;margin-bottom:6px">
+        <input name="invite_code" placeholder="Код-приглашение (необязательно)" style="padding:6px 8px;width:100%;margin-bottom:10px">
+        <button class="btn">Создать</button></form><hr style="margin:18px 0">
+      <h3>Присоединиться к команде</h3>
+      <form id="jForm">
+        <input name="invite_code" required placeholder="Код команды" style="padding:6px 8px;width:100%;margin-bottom:10px">
+        <button class="btn btn-outline">Присоединиться</button></form></div>`));
+    document.getElementById('cForm').onsubmit=async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.target);
+      const rr=await fetch('/api/team/create',{method:'POST',credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({team_name:fd.get('team_name'),invite_code:fd.get('invite_code')})});
+      if(rr.ok) load(); else alert((await rr.json()).msg||'Ошибка');
+    };
+    document.getElementById('jForm').onsubmit=async e=>{
+      e.preventDefault();
+      const fd=new FormData(e.target);
+      const rr=await fetch('/api/team/join',{method:'POST',credentials:'include',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({invite_code:fd.get('invite_code')})});
+      if(rr.ok) load(); else alert((await rr.json()).msg||'Ошибка');
+    };
+    return;
+  }
+
+  const t=data;
+  root.appendChild(html(`<div class="content-box"><h2>${t.team.team_name}</h2>
+    ${t.team.description?`<p>${t.team.description}</p>`:''}
+    <h3>Участники</h3><ul id="mList"></ul>
+    <form id="leave" style="margin-top:14px">
+      <button class="btn btn-outline" style="background:#e05555;color:#fff">Покинуть команду</button></form></div>`));
+  t.members.forEach(m=>document.getElementById('mList')
+    .appendChild(html(`<li${m.is_blocked?' style="color:#e05555"':''}>${m.username}</li>`)));
+  document.getElementById('leave').onsubmit=async e=>{
+    e.preventDefault();
+    if(!confirm('Покинуть команду?')) return;
+    await fetch('/api/team/leave',{method:'POST',credentials:'include'});
+    load();
+  };
+
+  root.appendChild(html(`<div class="content-box" style="margin-top:18px">
+    <h3>Статистика команды</h3>
+    <p>Событий: <strong>${t.stats.total}</strong></p>
+    <p>Побед:   <strong>${t.stats.wins}</strong></p></div>`));
+
+  const h=await fetch('/api/team/history?page='+page,{credentials:'include'});
+  if(h.ok){
+    const hd=(await h.json()).data;
+    if(hd.history.length){
+      const box=html(`<div class="content-box" style="margin-top:26px">
+        <h3>История событий</h3>
+        <table class="admin-table small"><thead>
+          <tr><th>Название</th><th>Дата</th><th>Счёт команды</th><th>Победитель</th></tr>
+        </thead><tbody id="hist"></tbody></table><div class="table-pagination" id="pager" style="text-align:right"></div></div>`);
+      hd.history.forEach(r=>box.querySelector('#hist')
+        .appendChild(html(`<tr><td>${r.name}</td><td>${r.date}</td><td>${r.my_pts}</td><td>${r.winner}</td></tr>`)));
+      for(let p=1;p<=hd.pages;p++)
+        box.querySelector('#pager').appendChild(html(p==hd.page?`<strong>${p}</strong>`:`<a href="?page=${p}">${p}</a>`));
+      root.appendChild(box);
+    }
+  }
+}
+load();
+</script>
+
+<style>
+.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.admin-table{border-collapse:collapse;width:100%}
+.admin-table.small th,.admin-table.small td{padding:4px 6px}
+.admin-table th,.admin-table td{border:1px solid #d4dee4;text-align:center}
+.admin-table thead{background:#f0f6fa;font-weight:600}
+.table-pagination a,strong{margin-left:4px}
+.btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+.btn.btn-outline{background:#fff;color:#0084c6;border:1px solid #0084c6}
+</style>
+</body></html>

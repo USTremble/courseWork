@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Команды</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <nav class="sidebar"><div class="logo">IB Competition</div><div id="navLinks"></div></nav>
+  <header class="topbar">
+    <div class="top-title" id="pageTitle">Команды</div>
+    <div class="avatar-menu">
+      <span id="uname"></span>
+      <img src="/static/default-avatar.png" class="avatar" id="aBtn">
+      <div class="dropdown" id="dd">
+        <a href="/profile.html">Профиль</a>
+        <a href="#" id="lo">Выйти</a>
+      </div>
+    </div>
+  </header>
+
+  <main style="padding-bottom:60px">
+    <h1>Команды</h1>
+    <form id="search" style="margin-bottom:12px">
+      <input name="q" placeholder="Поиск по TID / названию / UID участника"
+             style="padding:6px 8px;width:280px">
+      <button class="btn">Поиск</button>
+    </form>
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <h2>Список команд</h2>
+      <button class="btn btn-outline" id="reload">Обновить таблицу</button>
+    </div>
+    <div class="content-box">
+      <table class="admin-table" id="tbl">
+        <thead></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="table-pagination" id="pager"></div>
+  </main>
+
+  <script type="module">
+    import { initCommon } from '/static/js/common.js';
+    const me = await initCommon('Команды');
+    if (me.role !== 'admin') location.replace('/dashboard.html');
+
+    const $  = s => document.querySelector(s);
+    const $$ = s => document.querySelectorAll(s);
+    const params = new URLSearchParams(location.search);
+
+    let page = +params.get('page') || 1;
+    let q    = params.get('q')    || '';
+    let sort = params.get('sort') || 'team_id';
+    let dir  = params.get('dir')  || 'asc';
+
+    $('#search input').value = q;
+    $('#search').onsubmit = e => {
+      e.preventDefault();
+      q = new FormData(e.target).get('q') || '';
+      page = 1; updateURL(); load();
+    };
+    $('#reload').onclick = () => load();
+
+    function updateURL() {
+      params.set('page', page);
+      params.set('q', q);
+      params.set('sort', sort);
+      params.set('dir', dir);
+      history.replaceState(null, '', '?' + params);
+    }
+
+    function hdr(field, label) {
+      const icon = sort===field ? (dir==='asc' ? ' ↑' : ' ↓') : '';
+      return `<a href="#" data-sort="${field}">${label}${icon}</a>`;
+    }
+
+    async function load(){
+      $('#tbl thead').innerHTML = '<tr><th colspan="5">Загрузка…</th></tr>';
+      $('#tbl tbody').innerHTML = '';
+      $('#pager').innerHTML = '';
+
+      const res = await fetch(
+        `/api/admin/teams?page=${page}&q=${encodeURIComponent(q)}` +
+        `&sort=${sort}&dir=${dir}`,
+        { credentials:'include' }
+      );
+      if (!res.ok) {
+        alert('Ошибка API: '+res.status);
+        return;
+      }
+      const { data } = await res.json();
+
+      // Заголовки
+      $('#tbl thead').innerHTML = `
+        <tr>
+          <th>${hdr('team_id','TID')}</th>
+          <th>${hdr('team_name','Имя команды')}</th>
+          <th>${hdr('members','Кол-во участников')}</th>
+          <th>UID участников</th>
+          <th>Действие</th>
+        </tr>`;
+      $$('#tbl thead a[data-sort]').forEach(a=>{
+        a.onclick = e=>{
+          e.preventDefault();
+          const f = a.dataset.sort;
+          if (sort===f) dir = dir==='asc'?'desc':'asc';
+          else { sort = f; dir = 'asc'; }
+          page = 1; updateURL(); load();
+        };
+      });
+
+      // Тело таблицы
+      const body = $('#tbl tbody');
+      if (!data.teams.length) {
+        body.innerHTML = '<tr><td colspan="5">Ничего не найдено</td></tr>';
+      } else {
+        body.innerHTML = data.teams.map(t=>`
+          <tr>
+            <td>${t[0]}</td>
+            <td>${t[1]}</td>
+            <td>${t[3]}</td>
+            <td>${t[2]||'—'}</td>
+            <td>
+              <select data-tid="${t[0]}">
+                <option disabled selected>⋮</option>
+                <option value="delete">Удалить</option>
+                <option value="disband">Расформировать</option>
+                <option value="kick">Исключить участника</option>
+              </select>
+            </td>
+          </tr>`).join('');
+        // Действия
+        $$('#tbl tbody select[data-tid]').forEach(sel=>{
+          sel.onchange = async () => {
+            const tid = sel.dataset.tid, act = sel.value;
+            sel.selectedIndex = 0;
+            let body = { tid, act };
+            if (act === 'kick') {
+              const uid = prompt('UID участника для исключения:');
+              if (!uid) return;
+              body.kick_uid = uid;
+            } else if (act === 'delete') {
+              if (!confirm(`Удалить команду ${tid}?`)) return;
+            }
+            await fetch('/api/admin/team_action', {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+            load();
+          };
+        });
+      }
+
+      // Пагинация справа
+      for(let p=1; p<=data.pages; p++){
+        if (p===data.page) {
+          $('#pager').insertAdjacentHTML('beforeend', `<strong>${p}</strong>`);
+        } else {
+          $('#pager').insertAdjacentHTML('beforeend',
+            `<a href="#" data-p="${p}">${p}</a>`);
+        }
+      }
+      $$('#pager a').forEach(a=>{
+        a.onclick = e=>{
+          e.preventDefault();
+          page = +a.dataset.p; updateURL(); load();
+        };
+      });
+    }
+
+    load();
+  </script>
+
+  <style>
+    .content-box {
+      border: 1px solid #475d7d;
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.2);
+      background: #1a2335;
+    }
+    .admin-table {
+      border-collapse: collapse;
+      width: 100%;
+      color: #fff;
+    }
+    .admin-table th, .admin-table td {
+      padding: 8px 12px;
+      border: 1px solid #5e7296;
+      text-align: center;
+    }
+    .admin-table thead {
+      background: #22304d;
+      font-weight: 600;
+    }
+    .admin-table tbody tr:nth-child(even) {
+      background: rgba(255,255,255,0.05);
+    }
+    .table-pagination {
+      margin-top: 16px;
+      text-align: right;
+    }
+    .table-pagination a, .table-pagination strong {
+      display: inline-block;
+      padding: 4px 8px;
+      margin: 0 4px;
+    }
+    .table-pagination a {
+      color: #4d9eff;
+      text-decoration: none;
+    }
+    .table-pagination a:hover {
+      text-decoration: underline;
+    }
+    .table-pagination strong {
+      color: #fff;
+      font-weight: bold;
+    }
+    select {
+      background: #2a3a5a;
+      color: white;
+      border: 1px solid #475d7d;
+      border-radius: 4px;
+      padding: 4px;
+    }
+  </style>
+</body>
+</html>

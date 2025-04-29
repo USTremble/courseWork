@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Профиль</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<nav class="sidebar">
+  <div class="logo">IB Competition</div>
+  <div id="navLinks"></div>
+</nav>
+
+<header class="topbar">
+  <div class="top-title">Профиль</div>
+  <div class="avatar-menu">
+    <span id="uname"></span>
+    <img src="/static/default-avatar.png" class="avatar" id="aBtn">
+    <div class="dropdown" id="dd">
+      <a href="/profile.html">Профиль</a>
+      <a href="#" id="lo">Выйти</a>
+    </div>
+  </div>
+</header>
+
+<main style="padding-bottom:60px">
+  <h1>Профиль</h1>
+  <div id="content"></div>
+</main>
+
+<script type="module">
+import { initCommon } from '/static/js/common.js';
+const me=await initCommon('Профиль');
+const html=s=>{const t=document.createElement('template');t.innerHTML=s.trim();return t.content.firstChild;};
+const root=document.getElementById('content');
+
+const roleRu={player:'Участник',moderator:'Модератор',admin:'Администратор'}[me.role]||'';
+let teamLink='— нет —';
+try{
+  const t=await fetch('/api/team',{credentials:'include'});
+  const tj=(await t.json()).data;
+  if(tj&&tj.team) teamLink=`<a href="/team.html" class="link">${tj.team.team_name}</a>`;
+}catch{}
+
+root.appendChild(html(`<h2><span class="role ${me.role}">${roleRu}</span> ${me.username}</h2>
+  <p>Статус аккаунта: ${me.is_blocked?'<span style="color:#e05555">Заблокирован</span>':'<span style="color:#3cb371">Активен</span>'}</p>
+  <p>Текущая команда: ${teamLink}</p><hr style="margin:24px 0">`));
+
+root.appendChild(html(`<div class="content-box" style="max-width:360px">
+  <h3>Сменить пароль</h3>
+  <form method="post" action="/change_password">
+    <label>Старый пароль</label><input type="password" name="old" required>
+    <label>Новый пароль</label><input type="password" name="new" required>
+    <button class="btn">Сохранить</button></form></div>`));
+
+root.appendChild(html(`<div class="content-box" style="max-width:360px;margin-top:24px">
+  <h3 style="color:#e05555">Удалить аккаунт</h3>
+  <form method="post" action="/delete_account" onsubmit="return confirm('Удалить аккаунт безвозвратно?')">
+    <label>Пароль</label><input type="password" name="pwd" required>
+    <button class="btn btn-danger">Удалить</button></form></div>`));
+</script>
+
+<style>
+.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
+.role{padding:2px 6px;border-radius:4px;font-size:90%}
+.role.player{background:#29c97d;color:#fff}
+.role.moderator{background:#9b59e0;color:#fff}
+.role.admin{background:#e05555;color:#fff}
+.btn.btn-danger{background:#e05555;color:#fff}
+</style>
+</body></html>

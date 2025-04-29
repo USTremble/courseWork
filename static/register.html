@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Регистрация</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/css/public.css">
+</head>
+<body>
+<div class="auth-wrapper">
+  <div class="auth-box">
+    <h1>Регистрация</h1>
+    <p id="err" style="color:#ff7070;text-align:center;display:none"></p>
+
+    <form id="regForm">
+      <label>Логин</label>
+      <input type="text" name="username" required>
+      <label>Пароль</label>
+      <input type="password" name="password" required>
+      <label>Повторите пароль</label>
+      <input type="password" name="confirm_password" required>
+      <button>Зарегистрироваться</button>
+    </form>
+
+    <p>Уже есть аккаунт? <a href="/login.html">Войти</a></p>
+  </div>
+</div>
+
+<script>
+document.getElementById('regForm').addEventListener('submit',async e=>{
+  e.preventDefault();
+  const fd=new FormData(e.target);
+  const body={
+    username:fd.get('username'),
+    password:fd.get('password'),
+    confirm_password:fd.get('confirm_password')
+  };
+  const res=await fetch('/api/auth/register',{
+    method:'POST',
+    credentials:'include',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body)
+  });
+  if(res.ok){ location.replace('/dashboard.html'); }
+  else{
+    const j=await res.json().catch(()=>({msg:'Ошибка'}));
+    const err=document.getElementById('err');
+    err.textContent=j.msg||'Ошибка регистрации';
+    err.style.display='block';
+  }
+});
+</script>
+</body>
+</html>

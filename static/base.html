@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>IB Competition</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ────────── sidebar ────────── -->
+<nav class="sidebar">
+  <div class="logo">IB Competition</div>
+  <div id="navLinks"></div>
+</nav>
+
+<!-- ────────── top-bar ────────── -->
+<header class="topbar">
+  <div class="top-title" id="pageTitle"></div>
+  <div class="avatar-menu">
+    <span id="uname"></span>
+    <img src="/static/default-avatar.png" class="avatar" id="aBtn">
+    <div class="dropdown" id="dd">
+      <a href="/profile.html">Профиль</a>
+      <a href="#" id="lo">Выйти</a>
+    </div>
+  </div>
+</header>
+
+<!-- ────────── контент ────────── -->
+<main style="padding-bottom:60px">
+  <!-- вставляйте сюда содержимое конкретной страницы -->
+</main>
+
+<!-- ────────── общие скрипты ────────── -->
+<script>
+const $=q=>document.querySelector(q);
+
+
+/* ----- получаем роль и рендерим ----- */
+(async()=>{
+  const r=await fetch('/api/auth/me',{credentials:'include'});
+  if(!r.ok){location.replace('/login.html');return;}
+  const me=(await r.json()).data;
+  $('#uname').textContent=me.username;
+  renderSidebar(me.role);
+})();
+</script>
+
+<style>
+/* пара мелочей для заголовков разделов */
+.nav-head{padding:6px 8px 4px;font-size:12px;font-weight:600;color:#7c8a97;text-transform:uppercase}
+</style>
+</body>
+</html>
