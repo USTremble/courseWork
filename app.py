@@ -137,6 +137,47 @@ def api_login():
     session.update({'user_id':row[0],'username':u,'role':row[2]})
     return jsonify(ok=True)
 
+@app.post('/change_password')
+@login_required
+def api_change_password():
+    old = request.form.get('old','').strip()
+    new = request.form.get('new','').strip()
+    if not old or not new:
+        return json_error(400, 'Оба поля обязательны')
+    conn = get_db_connection(); cur = conn.cursor()
+    # проверяем текущий хэш
+    cur.execute("SELECT password FROM users WHERE user_id=%s", (session['user_id'],))
+    row = cur.fetchone()
+    if not row or not check_password_hash(row[0], old):
+        cur.close(); conn.close()
+        return json_error(400, 'Неверный пароль')
+    # обновляем новый
+    hashed = generate_password_hash(new)
+    cur.execute("UPDATE users SET password=%s WHERE user_id=%s", (hashed, session['user_id']))
+    conn.commit(); cur.close(); conn.close()
+    return jsonify(ok=True, msg='Пароль успешно изменён')
+
+
+@app.post('/api/delete_account')
+@login_required
+def api_delete_account():
+    d = request.get_json(silent=True) or {}
+    pwd = d.get('pwd', '')
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # проверяем, что пароль правильный
+    cur.execute("SELECT password FROM users WHERE user_id = %s", (session['user_id'],))
+    row = cur.fetchone()
+    if not row or not check_password_hash(row[0], pwd):
+        cur.close(); conn.close()
+        return json_error(400, "Неверный пароль")
+    # удаляем пользователя
+    cur.execute("DELETE FROM users WHERE user_id = %s", (session['user_id'],))
+    conn.commit()
+    cur.close(); conn.close()
+    session.clear()
+    return jsonify(ok=True)
+
 @app.post('/api/auth/logout')
 @login_required
 def api_logout():
@@ -187,20 +228,44 @@ def api_dashboard():
 ###############################################################################
 
 def current_team():
-    conn=get_db_connection(); cur=conn.cursor()
-    cur.execute("""SELECT t.team_id,t.team_name,t.description
-                     FROM teams t JOIN team_members tm ON t.team_id=tm.team_id
-                    WHERE tm.user_id=%s AND tm.active""",(session['user_id'],))
-    row=cur.fetchone()
+    conn = get_db_connection()
+    cur = conn.cursor()
+    # добавили t.invite_code в SELECT
+    cur.execute("""
+        SELECT t.team_id,
+               t.team_name,
+               t.description,
+               t.invite_code
+          FROM teams t
+          JOIN team_members tm ON t.team_id = tm.team_id
+         WHERE tm.user_id = %s AND tm.active
+    """, (session['user_id'],))
+    row = cur.fetchone()
     if not row:
-        cur.close(); conn.close(); return None,[]
-    cur.execute("""SELECT u.user_id,u.username,u.is_blocked
-                     FROM users u JOIN team_members tm ON tm.user_id=u.user_id
-                    WHERE tm.team_id=%s AND tm.active""",(row[0],))
-    members=[{'user_id':r[0],'username':r[1],'is_blocked':r[2]} for r in cur.fetchall()]
-    cur.close(); conn.close();
-    return {'team_id':row[0],'team_name':row[1],'description':row[2]}, members
-
+        cur.close()
+        conn.close()
+        return None, []
+    # собираем словарь команды с invite_code
+    team = {
+        'team_id':    row[0],
+        'team_name':  row[1],
+        'description':row[2],
+        'invite_code':row[3]
+    }
+    # теперь получаем участников, как раньше
+    cur.execute("""
+        SELECT u.user_id, u.username, u.is_blocked
+          FROM users u
+          JOIN team_members tm ON tm.user_id = u.user_id
+         WHERE tm.team_id = %s AND tm.active
+    """, (team['team_id'],))
+    members = [
+        {'user_id': r[0], 'username': r[1], 'is_blocked': r[2]}
+        for r in cur.fetchall()
+    ]
+    cur.close()
+    conn.close()
+    return team, members
 ###############################################################################
 #  TEAM API (get, create, join, leave) + NEW history
 ###############################################################################
@@ -302,6 +367,9 @@ def api_team_leave():
 #  API: события игрока
 ###############################################################################
 
+# ───────────────────── Dashboard / Events API … (не меняем) ──────────────────
+# --- замените только функцию api_events_get ниже ---
+
 @app.get("/api/events")
 @login_required
 def api_events_get():
@@ -310,61 +378,70 @@ def api_events_get():
         return jsonify(ok=True, data={"team": None})
 
     conn = get_db_connection(); cur = conn.cursor()
-    # текущий event
-    cur.execute(
-        """SELECT e.event_id,e.name,e.status,e.type,e.description,e.file_path
-               FROM events e JOIN event_teams et USING(event_id)
-              WHERE et.team_id=%s AND e.status IN ('waiting','running')
-              ORDER BY e.event_id DESC LIMIT 1""",
-        (team["team_id"],),
-    )
+
+    # Текущее или последнее событие (waiting / running / finished)
+    cur.execute("""
+        SELECT e.event_id,e.name,e.status,e.type,e.description,e.file_path
+          FROM events e
+          JOIN event_teams et USING(event_id)
+         WHERE et.team_id = %s
+           AND e.status IN ('waiting','running','finished')
+         ORDER BY e.event_id DESC
+         LIMIT 1
+    """, (team['team_id'],))
     cur_ev = cur.fetchone()
 
     leaderboard = []
-    if cur_ev and cur_ev[2] == "running":
-        cur.execute(
-            """SELECT ROW_NUMBER() OVER(ORDER BY points DESC) AS place,
-                              t.team_name, et.points
-                         FROM event_teams et JOIN teams t USING(team_id)
-                        WHERE et.event_id=%s ORDER BY et.points DESC""",
-            (cur_ev[0],),
-        )
+    if cur_ev and cur_ev[2] in ('running','finished'):
+        cur.execute("""
+            SELECT ROW_NUMBER() OVER(ORDER BY et.points DESC),
+                   t.team_name, et.points
+              FROM event_teams et JOIN teams t USING(team_id)
+             WHERE et.event_id = %s
+             ORDER BY et.points DESC
+        """, (cur_ev[0],))
         leaderboard = cur.fetchall()
 
     # waiting events not joined
-    cur.execute(
-        """SELECT e.event_id,e.name,e.type,e.description,
-                      (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams_cnt
-               FROM events e
-              WHERE e.status='waiting' AND NOT EXISTS (
-                      SELECT 1 FROM event_teams WHERE event_id=e.event_id AND team_id=%s)
-              ORDER BY e.event_id DESC""",
-        (team["team_id"],),
-    )
+    cur.execute("""
+        SELECT e.event_id,e.name,e.type,e.description,
+               (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams_cnt
+          FROM events e
+         WHERE e.status='waiting'
+           AND NOT EXISTS (
+                 SELECT 1 FROM event_teams
+                  WHERE event_id=e.event_id AND team_id=%s)
+         ORDER BY e.event_id DESC
+    """, (team['team_id'],))
     waiting = cur.fetchall()
     cur.close(); conn.close()
 
-    return jsonify(
-        ok=True,
-        data={
-            "team": team,
-            "current_event": cur_ev,
-            "leaderboard": leaderboard,
-            "waiting": waiting,
-        },
-    )
+    return jsonify(ok=True, data={
+        "team": team,
+        "current_event": cur_ev,
+        "leaderboard": leaderboard,
+        "waiting": waiting,
+    })
 
 
-@app.post("/api/events/join")
+
+@app.post('/api/events/join')
 @login_required
 def api_events_join():
-    team, _ = current_team()
+    # получаем команду и её участников
+    team, members = current_team()
     if not team:
         return json_error(400, "Нужно состоять в команде")
+
+    # новая проверка: если хоть один участник заблокирован
+    if any(m['is_blocked'] for m in members):
+        return json_error(403, "Один из участников команды заблокирован администратором")
+
     data = request.get_json(silent=True) or {}
-    code = str(data.get("code")) if "code" in data else None
-    eid  = data.get("event_id")
+    code = str(data.get('code')) if 'code' in data else None
+    eid  = data.get('event_id')
     conn = get_db_connection(); cur = conn.cursor()
+
     if code:
         cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code[:16],))
         ev = cur.fetchone()
@@ -373,6 +450,7 @@ def api_events_join():
         if ev[1] != "waiting":
             cur.close(); conn.close(); return json_error(400, "Регистрация закрыта")
         eid = ev[0]
+
     try:
         cur.execute(
             "INSERT INTO event_teams(event_id,team_id) VALUES(%s,%s)",
@@ -380,11 +458,34 @@ def api_events_join():
         )
         conn.commit()
     except psycopg2.errors.UniqueViolation:
-        conn.rollback()  # уже участвует – не ошибка с точки зрения клиента
+        conn.rollback()
     finally:
         cur.close(); conn.close()
+
     return jsonify(ok=True)
 
+
+# ───────────────────── API: отмена участия в событии ─────────────────────
+@app.post("/api/events/leave")
+@login_required
+def api_events_leave():
+    # узнаём текущую команду пользователя
+    team, _ = current_team()
+    if not team:
+        return json_error(400, "Нужно состоять в команде")
+    # удаляем запись о участии команды в любом активном событии
+    conn = get_db_connection(); cur = conn.cursor()
+    cur.execute("""
+        DELETE FROM event_teams
+         WHERE team_id = %s
+           AND event_id IN (
+               SELECT event_id FROM events
+                WHERE status IN ('waiting','running')
+           )
+    """, (team['team_id'],))
+    conn.commit()
+    cur.close(); conn.close()
+    return jsonify(ok=True)
 
 @app.post("/api/events/submit/<int:eid>")
 @login_required

@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>IB Competition</title>
+  <title>CyberBattle</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -10,7 +10,7 @@
 
 <!-- ────────── sidebar ────────── -->
 <nav class="sidebar">
-  <div class="logo">IB Competition</div>
+  <div class="logo">CyberBattle</div>
   <div id="navLinks"></div>
 </nav>
 
@@ -27,15 +27,49 @@
   </div>
 </header>
 
-<!-- ────────── контент ────────── -->
-<main style="padding-bottom:60px">
-  <!-- вставляйте сюда содержимое конкретной страницы -->
-</main>
-
 <!-- ────────── общие скрипты ────────── -->
 <script>
 const $=q=>document.querySelector(q);
 
+/* ----- меню аватара + logout ----- */
+$('#aBtn').onclick=e=>{e.stopPropagation();$('#dd').classList.toggle('show');};
+document.addEventListener('click',()=>$('#dd').classList.remove('show'));
+$('#lo').onclick=async e=>{
+  e.preventDefault();
+  await fetch('/api/auth/logout',{method:'POST',credentials:'include'});
+  location.replace('/login.html');
+};
+
+/* ----- динамичная боковая панель ----- */
+function renderSidebar(role){
+  const items=[
+    {href:'/dashboard.html',label:'Главная'},
+    {href:'/team.html',      label:'Команда'},
+    {href:'/events.html',    label:'События'},
+    {href:'/profile.html',   label:'Профиль'}
+  ];
+  if(role==='admin'){
+    items.push({header:'Администрирование'});
+    items.push({href:'/admin_users.html',label:'Пользователи'});
+    items.push({href:'/admin_teams.html',label:'Команды'});
+  }
+  if(role==='admin'||role==='moderator'){
+    items.push({header:'Модерация'});
+    items.push({href:'/mod_create.html', label:'Создать событие'});
+    items.push({href:'/mod_manage.html', label:'Проведение события'});
+  }
+
+  const nav=$('#navLinks'); nav.innerHTML='';
+  items.forEach(it=>{
+    if(it.header){
+      nav.insertAdjacentHTML('beforeend',`<div class="nav-head">${it.header}</div>`);
+    }else{
+      nav.insertAdjacentHTML('beforeend',
+        `<a href="${it.href}" class="nav-link${location.pathname===it.href?' active':''}">
+           ${it.label}</a>`);
+    }
+  });
+}
 
 /* ----- получаем роль и рендерим ----- */
 (async()=>{

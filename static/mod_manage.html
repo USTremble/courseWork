@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <nav class="sidebar"><div class="logo">IB Competition</div><div id="navLinks"></div></nav>
+  <nav class="sidebar"><div class="logo">CyberBattle</div><div id="navLinks"></div></nav>
   <header class="topbar">
     <div class="top-title" id="pageTitle">Проведение события</div>
     <div class="avatar-menu">
@@ -74,7 +74,7 @@
           <h4>${e.name}</h4>
           <p>${e.description}</p>
           <p>Тип: ${e.type.toUpperCase()}</p>
-          <p>Статус: ${e.status==='waiting'?'Ожидание':'В процессе'}</p>
+          <p>Статус: ${e.status==='waiting'?'Ожидание игроков':'В процессе'}</p>
           <p>Команд: ${e.teams}</p>
           <button class="btn" data-code="${e.code}">Провести событие</button>
         </div>`).join('');
@@ -127,9 +127,15 @@
       }
       pagHTML += '</div>';
 
+      const statusNames = {
+        waiting:  'Ожидание начала',
+        running:  'Игра идёт!',
+        finished: 'Событие завершено'
+      };
+      const statusRu = statusNames[status] || status;
       $('#manageSection').innerHTML = `
         <div style="display:flex;justify-content:space-between;align-items:center">
-          <h2>${name} <small>(${status})</small></h2>
+          <h2>${name} <small>(${statusRu})</small></h2>
           <div>
             <button id="refreshBtn" class="btn btn-outline" style="margin-right:6px">Обновить таблицу</button>
             <button id="backBtn"    class="btn btn-outline">← Назад</button>

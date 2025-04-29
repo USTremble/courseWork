@@ -7,66 +7,216 @@
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-<nav class="sidebar">
-  <div class="logo">IB Competition</div>
-  <div id="navLinks"></div>
-</nav>
+  <nav class="sidebar">
+    <div class="logo">CyberBattle</div>
+    <div id="navLinks"></div>
+  </nav>
 
-<header class="topbar">
-  <div class="top-title">Профиль</div>
-  <div class="avatar-menu">
-    <span id="uname"></span>
-    <img src="/static/default-avatar.png" class="avatar" id="aBtn">
-    <div class="dropdown" id="dd">
-      <a href="/profile.html">Профиль</a>
-      <a href="#" id="lo">Выйти</a>
+  <header class="topbar">
+    <div class="top-title">Профиль</div>
+    <div class="avatar-menu">
+      <span id="uname"></span>
+      <img src="/static/default-avatar.png" class="avatar" id="aBtn">
+      <div class="dropdown" id="dd">
+        <a href="/profile.html">Профиль</a>
+        <a href="#" id="lo">Выйти</a>
+      </div>
     </div>
-  </div>
-</header>
+  </header>
 
-<main style="padding-bottom:60px">
-  <h1>Профиль</h1>
-  <div id="content"></div>
-</main>
+  <main style="padding-bottom:60px">
+    <h1>Профиль</h1>
+    <div id="content"></div>
+  </main>
 
-<script type="module">
-import { initCommon } from '/static/js/common.js';
-const me=await initCommon('Профиль');
-const html=s=>{const t=document.createElement('template');t.innerHTML=s.trim();return t.content.firstChild;};
-const root=document.getElementById('content');
+  <script type="module">
+    import { initCommon } from '/static/js/common.js';
+    const me = await initCommon('Профиль');
 
-const roleRu={player:'Участник',moderator:'Модератор',admin:'Администратор'}[me.role]||'';
-let teamLink='— нет —';
-try{
-  const t=await fetch('/api/team',{credentials:'include'});
-  const tj=(await t.json()).data;
-  if(tj&&tj.team) teamLink=`<a href="/team.html" class="link">${tj.team.team_name}</a>`;
-}catch{}
+    const html = s => {
+      const t = document.createElement('template');
+      t.innerHTML = s.trim();
+      return t.content.firstChild;
+    };
+    const root = document.getElementById('content');
 
-root.appendChild(html(`<h2><span class="role ${me.role}">${roleRu}</span> ${me.username}</h2>
-  <p>Статус аккаунта: ${me.is_blocked?'<span style="color:#e05555">Заблокирован</span>':'<span style="color:#3cb371">Активен</span>'}</p>
-  <p>Текущая команда: ${teamLink}</p><hr style="margin:24px 0">`));
+    // Первая карточка: имя, роль, статус, команда
+    const roleNames = { player:'Участник', moderator:'Модератор', admin:'Администратор' };
+    const roleRu = roleNames[me.role] || '';
+    let teamLink = '— нет —';
+    try {
+      const tRes = await fetch('/api/team', { credentials:'include' });
+      const tData = (await tRes.json()).data;
+      if (tData && tData.team) {
+        teamLink = `<a href="/team.html" class="link">${tData.team.team_name}</a>`;
+      }
+    } catch {}
 
-root.appendChild(html(`<div class="content-box" style="max-width:360px">
-  <h3>Сменить пароль</h3>
-  <form method="post" action="/change_password">
-    <label>Старый пароль</label><input type="password" name="old" required>
-    <label>Новый пароль</label><input type="password" name="new" required>
-    <button class="btn">Сохранить</button></form></div>`));
+    root.appendChild(html(`
+      <div class="content-box" style="max-width:600px;margin:auto">
+        <h2 style="display:flex;align-items:center;gap:8px">
+          ${me.username}
+          <span class="role ${me.role}">${roleRu}</span>
+        </h2>
+        <p>Статус аккаунта:
+          ${me.is_blocked
+            ? '<span style="color:#e05555">Заблокирован</span>'
+            : '<span style="color:#3cb371">Активен</span>'}
+        </p>
+        <p>Текущая команда: ${teamLink}</p>
+      </div>
+    `));
 
-root.appendChild(html(`<div class="content-box" style="max-width:360px;margin-top:24px">
-  <h3 style="color:#e05555">Удалить аккаунт</h3>
-  <form method="post" action="/delete_account" onsubmit="return confirm('Удалить аккаунт безвозвратно?')">
-    <label>Пароль</label><input type="password" name="pwd" required>
-    <button class="btn btn-danger">Удалить</button></form></div>`));
-</script>
+    // Блок смены пароля
+    root.appendChild(html(`
+      <div class="content-box" style="max-width:600px;margin:24px auto">
+        <h3>Сменить пароль</h3>
+        <form id="changePwdForm">
+          <label>Старый пароль</label>
+          <input type="password" name="old" required>
+          <label>Новый пароль</label>
+          <input type="password" name="new" required>
+          <button class="btn" style="margin-top:12px">Сохранить</button>
+        </form>
+        <p id="pwdMsg" style="margin-top:12px;display:none;"></p>
+      </div>
+    `));
 
-<style>
-.content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-.role{padding:2px 6px;border-radius:4px;font-size:90%}
-.role.player{background:#29c97d;color:#fff}
-.role.moderator{background:#9b59e0;color:#fff}
-.role.admin{background:#e05555;color:#fff}
-.btn.btn-danger{background:#e05555;color:#fff}
-</style>
-</body></html>
+    // Блок удаления аккаунта
+    root.appendChild(html(`
+      <div class="content-box" style="max-width:600px;margin:0 auto">
+        <h3 style="color:#e05555">Удалить аккаунт</h3>
+        <form id="deleteForm">
+          <label>Введите пароль для подтверждения</label>
+          <input type="password" name="pwd" required>
+          <button class="btn btn-danger" style="margin-top:12px">Удалить аккаунт</button>
+        </form>
+        <p id="delMsg" style="margin-top:12px;display:none;"></p>
+      </div>
+    `));
+
+    // Обработчик смены пароля
+    document.getElementById('changePwdForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const data = new FormData(e.target);
+      const msgEl = document.getElementById('pwdMsg');
+      msgEl.style.display = 'none';
+      try {
+        const res = await fetch('/change_password', {
+          method: 'POST',
+          credentials: 'include',
+          body: data
+        });
+        const j = await res.json();
+        if (res.ok) {
+          msgEl.textContent = j.msg || 'Пароль успешно изменён';
+          msgEl.style.color = '#3cb371';
+        } else {
+          msgEl.textContent = j.msg || 'Ошибка при смене пароля';
+          msgEl.style.color = '#e05555';
+        }
+      } catch {
+        msgEl.textContent = 'Сетевая ошибка';
+        msgEl.style.color = '#e05555';
+      }
+      msgEl.style.display = 'block';
+      e.target.reset();
+    });
+
+    // Обработчик удаления аккаунта
+    document.getElementById('deleteForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!confirm('Удалить аккаунт безвозвратно?')) return;
+    const pwd = new FormData(e.target).get('pwd');
+    try {
+      const res = await fetch('/api/delete_account', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ pwd })
+      });
+      const j = await res.json();
+      if (res.ok) {
+        // при успешном удалении перенаправляем на index.html
+        location.replace('/index.html');
+      } else {
+        throw new Error(j.msg || 'Ошибка');
+      }
+    } catch (err) {
+      const msg = document.getElementById('delMsg');
+      msg.textContent = err.message;
+      msg.style.display = 'block';
+      msg.style.color = '#e05555';
+    }
+  });
+  </script>
+
+  <style>
+    .content-box {
+      border: 1px solid #4a5a75;
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.2);
+      background: #1f293e;
+      color: #fff;
+      margin-bottom: 24px;
+    }
+    .role {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 90%;
+    }
+    .role.player {
+      background: #29c97d;
+      color: #fff;
+    }
+    .role.moderator {
+      background: #9b59e0;
+      color: #fff;
+    }
+    .role.admin {
+      background: #e05555;
+      color: #fff;
+    }
+    label {
+      display: block;
+      margin-top: 12px;
+      font-size: 14px;
+    }
+    input {
+      width: 100%;
+      padding: 8px;
+      margin-top: 4px;
+      border-radius: 4px;
+      border: 1px solid #375176;
+      background: #2a3a5a;
+      color: #fff;
+    }
+    .btn {
+      background: #2563eb;
+      color: #fff;
+      padding: 8px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn:hover {
+      background: #1e40af;
+    }
+    .btn-danger {
+      background: #e05555;
+      color: #fff;
+    }
+    .btn-danger:hover {
+      background: #c2343f;
+    }
+    #pwdMsg, #delMsg {
+      font-size: 14px;
+    }
+    .link {
+      color: #4d9eff;
+      text-decoration: underline;
+    }
+  </style>
+</body>
+</html>

@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <nav class="sidebar"><div class="logo">IB Competition</div><div id="navLinks"></div></nav>
+  <nav class="sidebar"><div class="logo">CyberBattle</div><div id="navLinks"></div></nav>
   <header class="topbar">
     <div class="top-title" id="pageTitle">Команды</div>
     <div class="avatar-menu">
@@ -71,7 +71,7 @@
     }
 
     function hdr(field, label) {
-      const icon = sort===field ? (dir==='asc' ? ' ↑' : ' ↓') : '';
+      const icon = sort===field ? (dir==='asc'?' ↑':' ↓') : '';
       return `<a href="#" data-sort="${field}">${label}${icon}</a>`;
     }
 
@@ -122,39 +122,42 @@
             <td>${t[3]}</td>
             <td>${t[2]||'—'}</td>
             <td>
-              <select data-tid="${t[0]}">
-                <option disabled selected>⋮</option>
-                <option value="delete">Удалить</option>
-                <option value="disband">Расформировать</option>
-                <option value="kick">Исключить участника</option>
-              </select>
+              <div class="action-wrapper">
+                <span class="action-btn">Выполнить действие</span>
+                <div class="action-menu">
+                  <button data-tid="${t[0]}" class="disband">Расформировать</button>
+                  <button data-tid="${t[0]}" class="kick">Исключить участника</button>
+                  <button data-tid="${t[0]}" class="delete red">Удалить</button>
+                </div>
+              </div>
             </td>
           </tr>`).join('');
-        // Действия
-        $$('#tbl tbody select[data-tid]').forEach(sel=>{
-          sel.onchange = async () => {
-            const tid = sel.dataset.tid, act = sel.value;
-            sel.selectedIndex = 0;
-            let body = { tid, act };
-            if (act === 'kick') {
+        // действия
+        $$('#tbl tbody .action-menu button').forEach(btn=>{
+          btn.onclick = async () => {
+            const tid = btn.dataset.tid;
+            let act;
+            if (btn.classList.contains('disband')) act = 'disband';
+            else if (btn.classList.contains('kick')) {
+              act = 'kick';
               const uid = prompt('UID участника для исключения:');
               if (!uid) return;
-              body.kick_uid = uid;
-            } else if (act === 'delete') {
-              if (!confirm(`Удалить команду ${tid}?`)) return;
+              var body = { tid, act, kick_uid: uid };
             }
-            await fetch('/api/admin/team_action', {
-              method: 'POST',
-              credentials: 'include',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
+            else act = 'delete';
+            if (act==='delete' && !confirm(`Удалить команду ${tid}?`)) return;
+            await fetch('/api/admin/team_action',{
+              method:'POST',
+              credentials:'include',
+              headers:{'Content-Type':'application/json'},
+              body: JSON.stringify(body || { tid, act })
             });
             load();
           };
         });
       }
 
-      // Пагинация справа
+      // Пагинация
       for(let p=1; p<=data.pages; p++){
         if (p===data.page) {
           $('#pager').insertAdjacentHTML('beforeend', `<strong>${p}</strong>`);
@@ -199,6 +202,20 @@
     .admin-table tbody tr:nth-child(even) {
       background: rgba(255,255,255,0.05);
     }
+
+    /* Убираем подчёркивание и «фиолетовый» цвет у ссылок сортировки */
+    .admin-table th a {
+      text-decoration: none;
+      color: inherit;
+    }
+    .admin-table th a:hover {
+      text-decoration: underline;
+      color: inherit;
+    }
+    .admin-table th a:visited {
+      color: inherit;
+    }
+
     .table-pagination {
       margin-top: 16px;
       text-align: right;
@@ -207,24 +224,59 @@
       display: inline-block;
       padding: 4px 8px;
       margin: 0 4px;
-    }
-    .table-pagination a {
-      color: #4d9eff;
       text-decoration: none;
+      color: #4d9eff;
     }
     .table-pagination a:hover {
       text-decoration: underline;
+    }
+    .table-pagination a:visited {
+      color: #4d9eff;
     }
     .table-pagination strong {
       color: #fff;
       font-weight: bold;
     }
-    select {
-      background: #2a3a5a;
-      color: white;
+
+    /* Дизайн кнопок действий */
+    .action-wrapper { position: relative; display: inline-block; }
+    .action-btn {
+      cursor: pointer;
+      text-decoration: underline;
+      color: #4d9eff;
+      font-size: 14px;
+    }
+    .action-menu {
+      display: none;
+      position: absolute;
+      right: 0; top: 20px;
+      background: #1a2335;
       border: 1px solid #475d7d;
-      border-radius: 4px;
-      padding: 4px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.15);
+      min-width: 180px;
+      z-index: 10;
+    }
+    .action-wrapper:hover .action-menu {
+      display: block;
+    }
+    .action-menu button {
+      display: block;
+      width: 100%;
+      border: none;
+      background: none;
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      color: #fff;
+    }
+    .action-menu button:hover {
+      background: #22304d;
+    }
+    .action-menu .red {
+      background: #e05555;
+      color: #fff;
     }
   </style>
 </body>

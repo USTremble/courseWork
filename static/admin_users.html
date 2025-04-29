@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-  <nav class="sidebar"><div class="logo">IB Competition</div><div id="navLinks"></div></nav>
+  <nav class="sidebar"><div class="logo">CyberBattle</div><div id="navLinks"></div></nav>
   <header class="topbar">
     <div class="top-title" id="pageTitle">Пользователи</div>
     <div class="avatar-menu">
@@ -124,20 +124,26 @@
             <td>${u[3]}</td>
             <td>${u[4]?'Заблокирован':'Активен'}</td>
             <td>
-              <select data-uid="${u[0]}">
-                <option disabled selected>⋮</option>
-                <option value="moder">Назначить модератором</option>
-                <option value="toggle">${u[4]?'Разблокировать':'Заблокировать'}</option>
-                <option value="delete">Удалить</option>
-              </select>
+              <div class="action-wrapper">
+                <span class="action-btn">Выполнить действие</span>
+                <div class="action-menu">
+                  <button data-uid="${u[0]}" class="moder">Назначить модератором</button>
+                  <button data-uid="${u[0]}" class="toggle">${u[4]?'Разблокировать':'Заблокировать'}</button>
+                  <button data-uid="${u[0]}" class="delete red">Удалить</button>
+                </div>
+              </div>
             </td>
           </tr>`).join('');
         // действия
-        $$('#tbl tbody select[data-uid]').forEach(sel=>{
-          sel.onchange = async ()=>{
-            const uid = sel.dataset.uid, act = sel.value;
-            sel.selectedIndex = 0;
-            if (act==='delete' && !confirm(`Удалить пользователя ${uid}?`)) return;
+        $$('#tbl tbody .action-menu button').forEach(btn=>{
+          btn.onclick = async () => {
+            const uid = btn.dataset.uid, act = btn.classList.contains('moder') ? 'moder'
+                         : btn.classList.contains('toggle') ? 'toggle' : 'delete';
+            if ((act==='delete' || act==='moder') && !confirm(
+                  act==='delete'
+                    ? `Удалить пользователя ${uid}?`
+                    : `Назначить ${uid} модератором?`
+                )) return;
             await fetch('/api/admin/user_action',{
               method:'POST',
               credentials:'include',
@@ -194,6 +200,20 @@
     .admin-table tbody tr:nth-child(even) {
       background: rgba(255,255,255,0.05);
     }
+
+    /* Убираем подчёркивание и «фиолетовый» цвет у ссылок сортировки */
+    .admin-table th a {
+      text-decoration: none;
+      color: inherit;
+    }
+    .admin-table th a:hover {
+      text-decoration: underline;
+      color: inherit;
+    }
+    .admin-table th a:visited {
+      color: inherit;
+    }
+
     .table-pagination {
       margin-top: 16px;
       text-align: right;
@@ -202,24 +222,59 @@
       display: inline-block;
       padding: 4px 8px;
       margin: 0 4px;
-    }
-    .table-pagination a {
-      color: #4d9eff;
       text-decoration: none;
+      color: #4d9eff;
     }
     .table-pagination a:hover {
       text-decoration: underline;
+    }
+    .table-pagination a:visited {
+      color: #4d9eff;
     }
     .table-pagination strong {
       color: #fff;
       font-weight: bold;
     }
-    select {
-      background: #2a3a5a;
-      color: white;
+
+    /* Дизайн кнопок действий */
+    .action-wrapper { position: relative; display: inline-block; }
+    .action-btn {
+      cursor: pointer;
+      text-decoration: underline;
+      color: #4d9eff;
+      font-size: 14px;
+    }
+    .action-menu {
+      display: none;
+      position: absolute;
+      right: 0; top: 20px;
+      background: #1a2335;
       border: 1px solid #475d7d;
-      border-radius: 4px;
-      padding: 4px;
+      border-radius: 6px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.15);
+      min-width: 160px;
+      z-index: 10;
+    }
+    .action-wrapper:hover .action-menu {
+      display: block;
+    }
+    .action-menu button {
+      display: block;
+      width: 100%;
+      border: none;
+      background: none;
+      text-align: left;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      color: #fff;
+    }
+    .action-menu button:hover {
+      background: #22304d;
+    }
+    .action-menu .red {
+      background: #e05555;
+      color: #fff;
     }
   </style>
 </body>
