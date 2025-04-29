@@ -107,7 +107,17 @@
           <td style="text-align:left">${t[1]}</td>
           <td>${t[2]}</td>
           <td style="text-align:left">${t[3]} <small>${t[4]}</small></td>
-          ${status!=='finished'?`<td><select data-tid="${t[0]}"><option disabled selected>⋮</option><option value="+1">+ очко</option><option value="-1">− очко</option><option value="dq">Дисквалификация</option></select></td>`:''}
+          ${status!=='finished'?`
+          <td>
+            <div class="action-wrapper">
+              <span class="action-btn">Выполнить&nbsp;действие</span>
+              <div class="action-menu">
+                <button type="button" class="plus"  data-tid="${t[0]}">Добавить очки</button>
+                <button type="button" class="minus" data-tid="${t[0]}">Убрать очки</button>
+                <button type="button" class="dq red" data-tid="${t[0]}">Дисквалифицировать</button>
+              </div>
+            </div>
+          </td>`:''}
         </tr>`).join('');
 
       /* pagination html */
@@ -141,11 +151,37 @@
       if(status==='waiting') $('#startBtn').onclick = async ()=>{ await patch({start:true}); };
       if(status!=='finished' && status!=='waiting') $('#finishBtn').onclick = async ()=>{ await patch({finish:true}); };
 
-      $$('#manageSection select[data-tid]').forEach(sel=>{
-        sel.onchange = async ()=>{
-          const tid=sel.dataset.tid,v=sel.value; sel.selectedIndex=0;
-          if(v==='dq' && !confirm('Дисквалифицировать команду?')) return;
-          await patch(v==='dq'?{dq:true,team_id:tid}:{delta:v,team_id:tid});
+      // Валидация и отправка очков / DQ ------------------------------------
+      function promptPoints(){
+        let pts = prompt('Введите количество очков (1-100):');
+        pts = Number(pts);
+        if(!Number.isInteger(pts) || pts < 1 || pts > 100){
+          alert('Неверное значение');
+          return null;
+        }
+        return pts;
+      }
+
+      $$('#manageSection .plus').forEach(btn=>{
+        btn.onclick = async ()=>{
+          const pts = promptPoints();
+          if(pts===null) return;
+          await patch({delta:pts,team_id:btn.dataset.tid});
+        };
+      });
+
+      $$('#manageSection .minus').forEach(btn=>{
+        btn.onclick = async ()=>{
+          const pts = promptPoints();
+          if(pts===null) return;
+          await patch({delta:-pts,team_id:btn.dataset.tid});
+        };
+      });
+
+      $$('#manageSection .dq').forEach(btn=>{
+        btn.onclick = async ()=>{
+          if(!confirm('Дисквалифицировать команду?')) return;
+          await patch({dq:true,team_id:btn.dataset.tid});
         };
       });
 
@@ -176,6 +212,15 @@
     .admin-table thead{background:#22304d;font-weight:600}
     select{background:#2a3a5a;color:#fff;border:1px solid #375176;border-radius:4px;padding:4px}
     .table-pagination a,strong{margin-left:4px}
+
+    /* --- action‑menu styles --- */
+    .action-wrapper{position:relative;display:inline-block}
+    .action-btn{cursor:pointer;text-decoration:underline;color:#4d9eff;font-size:14px}
+    .action-menu{display:none;position:absolute;right:0;top:20px;background:#1f293e;border:1px solid #4a5a75;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.15);min-width:180px;z-index:20}
+    .action-menu button{display:block;width:100%;border:none;background:none;text-align:left;padding:8px 12px;font-size:14px;cursor:pointer;color:#fff}
+    .action-menu button:hover{background:#22304d}
+    .action-menu .red{background:#e05555;color:#fff}
+    .action-wrapper:hover .action-menu{display:block}
   </style>
 </body>
 </html>
