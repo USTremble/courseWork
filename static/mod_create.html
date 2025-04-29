@@ -23,26 +23,26 @@
   <main style="padding:24px">
     <form id="createForm" class="content-box" style="max-width:480px;margin:auto" enctype="multipart/form-data">
       <h2>Новое событие</h2>
-      <label>Код события (≤16 символов)<br>
+      <label>Код события<br>
         <input name="code" maxlength="16" required placeholder="Уникальный код">
       </label>
-      <label>Название события (≤50 символов)<br>
-        <input name="name" maxlength="50" required placeholder="Например: Олимпиада по математике">
+      <label>Название события<br>
+        <input name="name" maxlength="50" required placeholder="Например: квиз для новеньких">
       </label>
-      <label>Описание (≤150 символов)<br>
-        <textarea name="desc" rows="4" maxlength="150" required placeholder="Коротко о задании…"></textarea>
+      <label>Описание<br>
+        <textarea name="desc" rows="4" maxlength="150" required placeholder="Коротко о задании"></textarea>
       </label>
       <label>Тип события<br>
         <select name="ev_type" required>
-          <option value="">— выберите —</option>
+          <option value="">Выберите тип</option>
           <option value="quiz">Квиз</option>
           <option value="ctf">CTF</option>
         </select>
       </label>
-      <label>Правильный ответ (≤20 символов)<br>
-        <input name="answer" maxlength="20" required placeholder="Точный ответ для проверки">
+      <label>Правильный ответ<br>
+        <input name="answer" maxlength="20" required placeholder="Точный ответ для автоматической проверки">
       </label>
-      <label>PDF-задание<br>
+      <label>Файл с заданием (PDF-формата)<br>
         <input type="file" name="task" accept=".pdf" required>
       </label>
       <button class="btn" type="submit" style="margin-top:12px">Создать событие</button>

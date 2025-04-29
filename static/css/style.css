@@ -189,3 +189,36 @@ h1 { margin-bottom: 12px; font-size: 1.6rem; }
   .avatar-menu #uname {
     margin-right: 12px; /* своё значение */
   }
+
+  /* Базовый стиль кнопки */
+.btn {
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: none;
+    background-color: #4d9eff; 
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+    min-width: 10px; 
+    text-align: center;
+    box-sizing: border-box;
+  }
+  
+  /* Основная акцентная кнопка */
+  .btn-primary {
+    background-color: #4d9eff;  /* Синий */
+  }
+  .btn-primary:hover {
+    background-color: #3a8ae8;  /* Темно-синий при наведении */
+  }
+  
+  /* Вторичная кнопка (например, "Обновить") */
+  .btn-outline {
+    background: transparent;
+    border: 1px solid #4d9eff;  /* Синяя рамка */
+    color: #4d9eff;              /* Синий текст */
+  }
+  .btn-outline:hover {
+    background: rgba(77, 158, 255, 0.1);  /* Слегка синий фон */
+  }

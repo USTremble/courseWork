@@ -25,11 +25,11 @@
     <form id="search" style="margin-bottom:12px">
       <input name="q" placeholder="Поиск по UID / TID / логину"
              style="padding:6px 8px;width:280px">
-      <button class="btn">Поиск</button>
+        <button class="btn btn-primary">Поиск</button>
     </form>
-    <div style="display:flex;justify-content:space-between;align-items:center">
+    <div style="display:flex;justify-content:space-between;align-items:center; margin-bottom: 16px;">
       <h2>Список пользователей</h2>
-      <button class="btn btn-outline" id="reload">Обновить таблицу</button>
+      <button class="btn" id="reload">Обновить таблицу</button>
     </div>
     <div class="content-box">
       <table class="admin-table" id="tbl">
@@ -276,6 +276,31 @@
       background: #e05555;
       color: #fff;
     }
+
+    .btn {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: none;
+    background-color: #4d9eff;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.2s;
+    min-width: 80px;  /* Минимальная ширина */
+    max-width: 170px; /* Максимальная ширина */
+  }
+
+  .btn:hover {
+    background-color: #3a8ae8;
+  }
+
+  .btn-primary {
+    background-color: #4d9eff;
+  }
+
+  .btn-primary:hover {
+    background-color: #3a8ae8;
+  }
   </style>
 </body>
 </html>

@@ -1,12 +1,14 @@
 import os, random, string
 from functools import wraps
-import psycopg2, psycopg2.errors
-from flask import (
-    Flask, request, jsonify, session, g,
-    send_from_directory, abort
-)
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
+
+import psycopg2
+from psycopg2.errors import UniqueViolation
+from flask import (
+    Flask, request, jsonify, session,
+    g, send_from_directory, abort
+)
 
 try:
     from flask_cors import CORS         
@@ -223,7 +225,6 @@ def current_team():
     cur.execute("""
         SELECT t.team_id,
                t.team_name,
-               t.description,
                t.invite_code
           FROM teams t
           JOIN team_members tm ON t.team_id = tm.team_id
@@ -238,8 +239,7 @@ def current_team():
     team = {
         'team_id':    row[0],
         'team_name':  row[1],
-        'description':row[2],
-        'invite_code':row[3]
+        'invite_code':row[2]
     }
 
     cur.execute("""
@@ -316,8 +316,13 @@ def api_team_create():
                      ON CONFLICT (user_id) DO UPDATE SET team_id=EXCLUDED.team_id,active=TRUE""",
                     (session['user_id'],tid))
         conn.commit()
-    except psycopg2.errors.UniqueViolation:
-        conn.rollback(); return json_error(409,'Имя команды или код уже заняты')
+    except UniqueViolation as e:
+        conn.rollback()
+        if 'teams_name_unique' in e.pgerror:
+            return json_error(409, 'Имя команды уже занято')
+        if 'teams_code_unique' in e.pgerror:
+            return json_error(409, 'Код команды уже занят')
+        return json_error(409, 'Команда с такими данными уже существует')
     finally:
         cur.close(); conn.close()
     return jsonify(ok=True)
@@ -522,9 +527,13 @@ def api_mod_create():
         """, (code, name, desc, ev_type, answer, rel_path, session['user_id']))
         code_ret, name_ret = cur.fetchone()
         conn.commit()
-    except psycopg2.errors.UniqueViolation:
+    except UniqueViolation as e:
         conn.rollback()
-        return json_error(409, 'Код события уже занят')
+        if 'events_code_unique' in e.pgerror:
+            return json_error(409, 'Код события уже занят')
+        if 'events_name_unique' in e.pgerror:
+            return json_error(409, 'Название события уже занято')
+        return json_error(409, 'Событие с такими данными уже существует')
     finally:
         cur.close(); conn.close()
 

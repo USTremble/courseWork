@@ -22,14 +22,14 @@
 
   <main style="padding-bottom:60px">
     <h1>Команды</h1>
-    <form id="search" style="margin-bottom:12px">
+    <form id="search" style="margin-bottom:12px; display:flex; gap:8px; align-items:center">
       <input name="q" placeholder="Поиск по TID / названию / UID участника"
-             style="padding:6px 8px;width:280px">
-      <button class="btn">Поиск</button>
+            style="padding:6px 8px; flex:1; max-width: 280px;">
+            <button type="submit" class="btn btn-primary" style="min-width: 60px;">Поиск</button>
     </form>
-    <div style="display:flex;justify-content:space-between;align-items:center">
+    <div style="display:flex;justify-content:space-between;align-items:center; margin-bottom:12px">
       <h2>Список команд</h2>
-      <button class="btn btn-outline" id="reload">Обновить таблицу</button>
+      <button id="reload" class="btn btn-secondary">Обновить таблицу</button>
     </div>
     <div class="content-box">
       <table class="admin-table" id="tbl">
@@ -39,6 +39,7 @@
     </div>
     <div class="table-pagination" id="pager"></div>
   </main>
+
 
   <script type="module">
     import { initCommon } from '/static/js/common.js';
@@ -278,6 +279,7 @@
       background: #e05555;
       color: #fff;
     }
+
   </style>
 </body>
 </html>
