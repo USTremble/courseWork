@@ -1,4 +1,4 @@
-/* ─── общие (публичная зона) ─── */
+/* public */
 :root {
     --blue-2: #415a77;
     --blue-3: #778da9;
@@ -19,7 +19,7 @@ body {
     color: var(--font-light);
 }
 
-/* ─── центрированная карточка ─── */
+/* center'ed card */
 .auth-wrapper {
     display: flex;
     justify-content: center;

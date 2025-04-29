@@ -231,7 +231,7 @@
         </div>
       `));
       document.getElementById('closeBtn').onclick = () => {
-        // запомним, что это событие пользователь закрыл
+        // это событие пользователь закрыл
         localStorage.setItem('dismissedEventId', String(ev[0]));
         dismissedEventId = String(ev[0]);
         currentEvent = null;
@@ -278,20 +278,103 @@
   </script>
 
   <style>
-    .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-top:12px}
-    .content-box{border:1px solid #4a5a75;border-radius:8px;padding:18px;background:#1f293e;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.2)}
-    .card{border:1px solid #4a5a75;border-radius:8px;padding:14px;background:#1f293e;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.2)}
-    .admin-table{border-collapse:collapse;width:100%}
-    .admin-table.small th,.admin-table.small td{padding:4px 6px}
-    .admin-table th,.admin-table td{border:1px solid #375176;text-align:center;color:#fff}
-    .admin-table thead{background:#22304d;font-weight:600}
-    .table-pagination a,strong{margin-left:4px}
-    .table-pagination a{color:#4d9eff;text-decoration:none}
-    .table-pagination a:hover{text-decoration:underline}
-    .table-pagination strong{color:#fff;font-weight:bold}
-    .btn{background:#2563eb;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
-    .btn.btn-outline{background:#2a3a5a;color:#4d9eff;border:1px solid #4d9eff}
-    .link{color:#4d9eff;text-decoration:underline}
+/* Сетка карточек */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+    margin-top: 12px;
+}
+
+/* контейнер с контентом*/
+.content-box {
+    border: 1px solid #4a5a75;
+    border-radius: 8px;
+    padding: 18px;
+    background: #1f293e;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+}
+
+/* Одиночная карточка: рамка, фон, отступы и тень */
+.card {
+    border: 1px solid #4a5a75;
+    border-radius: 8px;
+    padding: 14px;
+    background: #1f293e;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+}
+
+/* базовые настройки таблицы  */
+.admin-table {
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.admin-table.small th,
+.admin-table.small td {
+    padding: 4px 6px;
+}
+
+.admin-table th,
+.admin-table td {
+    border: 1px solid #375176;
+    text-align: center;
+    color: #fff;
+}
+
+/* стили заголовка таблицы: фон и жирность */
+.admin-table thead {
+    background: #22304d;
+    font-weight: 600;
+}
+
+.table-pagination a,
+.table-pagination strong {
+    margin-left: 4px;
+}
+
+/* пагинация и подчерк */
+.table-pagination a {
+    color: #4d9eff;
+    text-decoration: none;
+}
+
+/* при наведении */
+.table-pagination a:hover {
+    text-decoration: underline;
+}
+
+/* пагинация */
+.table-pagination strong {
+    color: #fff;
+    font-weight: bold;
+}
+
+/* общий стиль кнопок: фон, цвет, отступы, скругления и курсор */
+.btn {
+    background: #2563eb;
+    color: #fff;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+/* фон, цвет рамки и текста */
+.btn.btn-outline {
+    background: #2a3a5a;
+    color: #4d9eff;
+    border: 1px solid #4d9eff;
+}
+
+/* Стили ссылок вида «link»: цвет и подчёркивание */
+.link {
+    color: #4d9eff;
+    text-decoration: underline;
+}
+
   </style>
 </body>
 </html>

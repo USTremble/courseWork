@@ -34,6 +34,7 @@ document.getElementById('loginForm').addEventListener('submit',async e=>{
     headers:{'Content-Type':'application/json'},
     body:JSON.stringify({username:fd.get('username'),password:fd.get('password')})
   });
+  
   if(res.ok){ location.replace('/dashboard.html'); }
   else{
     const j=await res.json().catch(()=>({msg:'Ошибка'}));

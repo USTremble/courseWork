@@ -1,7 +1,6 @@
 import os, random, string
 from functools import wraps
 import psycopg2, psycopg2.errors
-
 from flask import (
     Flask, request, jsonify, session, g,
     send_from_directory, abort
@@ -10,11 +9,10 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
 try:
-    from flask_cors import CORS          # для локальной отладки фронта
+    from flask_cors import CORS         
 except ImportError:
     CORS = None
 
-# ─────────────────────── конфиг ───────────────────────
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 app.secret_key = os.getenv("SECRET_KEY", "777")
 if CORS:
@@ -64,7 +62,6 @@ def moderator_required(f):
         return f(*a, **kw)
     return w
 
-# ───── before_request ─────
 @app.before_request
 def sync_user():
     uid = session.get('user_id')
@@ -79,11 +76,10 @@ def sync_user():
         session.clear()
     cur.close(); conn.close(); g.user = session.get('username')
 
-# ─── вернуть статические HTML для админки ───
+#статики для админки 
 @app.route('/admin/users')
 @admin_required
 def admin_users_spa():
-    # отдадим static/admin_users.html
     return send_from_directory(app.static_folder, 'admin_users.html')
 
 @app.route('/admin/teams')
@@ -91,8 +87,6 @@ def admin_users_spa():
 def admin_teams_spa():
     return send_from_directory(app.static_folder, 'admin_teams.html')
 
-
-# ─── SPA-роутер (никогда не переехал) ───
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def spa(path=''):
@@ -145,18 +139,17 @@ def api_change_password():
     if not old or not new:
         return json_error(400, 'Оба поля обязательны')
     conn = get_db_connection(); cur = conn.cursor()
-    # проверяем текущий хэш
-    cur.execute("SELECT password FROM users WHERE user_id=%s", (session['user_id'],))
+    
+    cur.execute("SELECT password FROM users WHERE user_id=%s", (session['user_id'],)) # проверяем текущий хэш
     row = cur.fetchone()
     if not row or not check_password_hash(row[0], old):
         cur.close(); conn.close()
         return json_error(400, 'Неверный пароль')
-    # обновляем новый
-    hashed = generate_password_hash(new)
+
+    hashed = generate_password_hash(new)  # обновляем новый
     cur.execute("UPDATE users SET password=%s WHERE user_id=%s", (hashed, session['user_id']))
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True, msg='Пароль успешно изменён')
-
 
 @app.post('/api/delete_account')
 @login_required
@@ -165,14 +158,14 @@ def api_delete_account():
     pwd = d.get('pwd', '')
     conn = get_db_connection()
     cur = conn.cursor()
-    # проверяем, что пароль правильный
-    cur.execute("SELECT password FROM users WHERE user_id = %s", (session['user_id'],))
+    
+    cur.execute("SELECT password FROM users WHERE user_id = %s", (session['user_id'],)) # проверяем, что пароль правильный
     row = cur.fetchone()
     if not row or not check_password_hash(row[0], pwd):
         cur.close(); conn.close()
         return json_error(400, "Неверный пароль")
-    # удаляем пользователя
-    cur.execute("DELETE FROM users WHERE user_id = %s", (session['user_id'],))
+
+    cur.execute("DELETE FROM users WHERE user_id = %s", (session['user_id'],)) # удаляем пользователя
     conn.commit()
     cur.close(); conn.close()
     session.clear()
@@ -194,7 +187,7 @@ def api_me():
         'is_blocked': session.get('is_blocked', False)
     })
 
-# ───────────────────── Dashboard API (коротко) ─────────────────────
+#Dashboard
 @app.get('/api/dashboard')
 @login_required
 def api_dashboard():
@@ -223,14 +216,10 @@ def api_dashboard():
     cur.close(); conn.close()
     return jsonify(ok=True,data=res)
 
-###############################################################################
-#  Вспомогательная current_team()
-###############################################################################
-
 def current_team():
     conn = get_db_connection()
     cur = conn.cursor()
-    # добавили t.invite_code в SELECT
+
     cur.execute("""
         SELECT t.team_id,
                t.team_name,
@@ -245,14 +234,14 @@ def current_team():
         cur.close()
         conn.close()
         return None, []
-    # собираем словарь команды с invite_code
+
     team = {
         'team_id':    row[0],
         'team_name':  row[1],
         'description':row[2],
         'invite_code':row[3]
     }
-    # теперь получаем участников, как раньше
+
     cur.execute("""
         SELECT u.user_id, u.username, u.is_blocked
           FROM users u
@@ -266,10 +255,8 @@ def current_team():
     cur.close()
     conn.close()
     return team, members
-###############################################################################
-#  TEAM API (get, create, join, leave) + NEW history
-###############################################################################
 
+#Команда
 @app.get('/api/team')
 @login_required
 def api_team_get():
@@ -293,19 +280,19 @@ def api_team_history():
         return json_error(400,'Нужно состоять в команде')
     off=(page-1)*HIST_PER_PAGE
     conn=get_db_connection(); cur=conn.cursor()
-    # сколько всего строк
+
     cur.execute("""SELECT COUNT(*) FROM events e JOIN event_teams et USING(event_id)
-                 WHERE et.team_id=%s AND e.status='finished'""",(team['team_id'],))
+                 WHERE et.team_id=%s AND e.status='finished'""",(team['team_id'],))     # сколько всего строк
     total=cur.fetchone()[0]
     pages=(total+HIST_PER_PAGE-1)//HIST_PER_PAGE
-    # сами данные
-    cur.execute("""SELECT e.name, TO_CHAR(NOW()::date,'DD.MM.YYYY') AS dt, et.points,
+
+    cur.execute("""SELECT e.name, TO_CHAR(NOW()::date,'DD.MM.YYYY') AS dt, et.points,     
                          (SELECT t2.team_name FROM event_teams et2 JOIN teams t2 USING(team_id)
                            WHERE et2.event_id=e.event_id ORDER BY et2.points DESC LIMIT 1)
                   FROM events e JOIN event_teams et USING(event_id)
                  WHERE et.team_id=%s AND e.status='finished'
                  ORDER BY e.event_id DESC LIMIT %s OFFSET %s""",
-                (team['team_id'], HIST_PER_PAGE, off))
+                (team['team_id'], HIST_PER_PAGE, off)) # сами данные
     hist=[{'name':r[0],'date':r[1],'my_pts':r[2],'winner':r[3]} for r in cur.fetchall()]
     cur.close(); conn.close()
     return jsonify(ok=True,data={'history':hist,'page':page,'pages':pages})
@@ -363,13 +350,6 @@ def api_team_leave():
     cur.close(); conn.close();
     return jsonify(ok=True)
 
-###############################################################################
-#  API: события игрока
-###############################################################################
-
-# ───────────────────── Dashboard / Events API … (не меняем) ──────────────────
-# --- замените только функцию api_events_get ниже ---
-
 @app.get("/api/events")
 @login_required
 def api_events_get():
@@ -379,7 +359,7 @@ def api_events_get():
 
     conn = get_db_connection(); cur = conn.cursor()
 
-    # Текущее или последнее событие (waiting / running / finished)
+    #waiting / running / finished
     cur.execute("""
         SELECT e.event_id,e.name,e.status,e.type,e.description,e.file_path
           FROM events e
@@ -402,7 +382,6 @@ def api_events_get():
         """, (cur_ev[0],))
         leaderboard = cur.fetchall()
 
-    # waiting events not joined
     cur.execute("""
         SELECT e.event_id,e.name,e.type,e.description,
                (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams_cnt
@@ -412,7 +391,7 @@ def api_events_get():
                  SELECT 1 FROM event_teams
                   WHERE event_id=e.event_id AND team_id=%s)
          ORDER BY e.event_id DESC
-    """, (team['team_id'],))
+    """, (team['team_id'],)) #без waiting 
     waiting = cur.fetchall()
     cur.close(); conn.close()
 
@@ -423,18 +402,14 @@ def api_events_get():
         "waiting": waiting,
     })
 
-
-
 @app.post('/api/events/join')
 @login_required
 def api_events_join():
-    # получаем команду и её участников
-    team, members = current_team()
+    team, members = current_team()    #команда и её участники
     if not team:
         return json_error(400, "Нужно состоять в команде")
 
-    # новая проверка: если хоть один участник заблокирован
-    if any(m['is_blocked'] for m in members):
+    if any(m['is_blocked'] for m in members): #если хоть один участник заблокирован
         return json_error(403, "Один из участников команды заблокирован администратором")
 
     data = request.get_json(silent=True) or {}
@@ -464,16 +439,13 @@ def api_events_join():
 
     return jsonify(ok=True)
 
-
-# ───────────────────── API: отмена участия в событии ─────────────────────
 @app.post("/api/events/leave")
 @login_required
 def api_events_leave():
-    # узнаём текущую команду пользователя
     team, _ = current_team()
     if not team:
         return json_error(400, "Нужно состоять в команде")
-    # удаляем запись о участии команды в любом активном событии
+
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""
         DELETE FROM event_teams
@@ -518,11 +490,7 @@ def api_submit_answer(eid):
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True)
 
-###############################################################################
-#  API: модератор – создать событие
-###############################################################################
-
-# ─── модератор: создание события ─────────────────────────
+# модерка
 @app.route('/api/mod/events', methods=['POST'])
 @moderator_required
 def api_mod_create():
@@ -533,21 +501,18 @@ def api_mod_create():
     answer  = request.form.get('answer','').strip()
     pdf     = request.files.get('task')
 
-    # все поля обязательны
-    if not code:
+    if not code: # все поля обязательны
         return json_error(400, 'Код события обязателен')
     if not name or not desc or not ev_type or not answer:
         return json_error(400, 'Все поля должны быть заполнены')
     if not pdf or not pdf.filename.lower().endswith('.pdf'):
         return json_error(400, 'Нужен файл в формате PDF')
 
-    # сохраняем PDF
     filename = secure_filename(pdf.filename)
     rel_path = os.path.join('tasks', filename)
     abs_path = os.path.join(app.static_folder, rel_path)
     pdf.save(abs_path)
 
-    # запись в БД
     conn = get_db_connection(); cur = conn.cursor()
     try:
         cur.execute("""
@@ -565,8 +530,6 @@ def api_mod_create():
 
     return jsonify(ok=True, data={'code': code_ret, 'name': name_ret})
 
-
-# ─── модератор: список активных (waiting/running) ────────
 @app.route('/api/mod/events', methods=['GET'])
 @moderator_required
 def api_mod_active():
@@ -584,8 +547,6 @@ def api_mod_active():
     cur.close(); conn.close()
     return jsonify(ok=True, data=data)
 
-
-# ─── модератор: получить конкретное событие и его команды ──
 @app.route('/api/mod/events/<code>', methods=['GET'])
 @moderator_required
 def api_mod_manage_get(code):
@@ -615,8 +576,6 @@ def api_mod_manage_get(code):
     cur.close(); conn.close()
     return jsonify(ok=True, data={'event': ev, 'teams': teams})
 
-
-# ─── модератор: изменение статуса / очков / дисквалификация ──
 @app.route('/api/mod/events/<code>', methods=['PATCH'])
 @moderator_required
 def api_mod_manage_patch(code):
@@ -647,12 +606,7 @@ def api_mod_manage_patch(code):
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True)
 
-
-###############################################################################
-#  API: админ – пользователи
-###############################################################################
-
-# ─────────────────── /api/admin/users ──────────────────────────
+#адмика
 @app.get('/api/admin/users')
 @admin_required
 def api_admin_users():
@@ -665,7 +619,6 @@ def api_admin_users():
         sort = 'user_id'
     dir_sql = 'ASC' if order=='asc' else 'DESC'
 
-    # Базовый FROM
     base_from = "FROM users u"
     where, params = '', []
 
@@ -683,7 +636,6 @@ def api_admin_users():
 
     sql_count = f"SELECT COUNT(*) {base_from} {where}"
 
-    # LATERAL для отображения текущей команды
     sql_rows = f"""
         SELECT u.user_id,
                u.username,
@@ -713,7 +665,6 @@ def api_admin_users():
     pages = (total + PER_PAGE - 1)//PER_PAGE
     return jsonify(ok=True, data={'users':users,'page':page,'pages':pages})
 
-# ---------- POST /api/admin/user_action ----------
 @app.post('/api/admin/user_action')
 @admin_required
 def api_admin_user_action():
@@ -733,8 +684,6 @@ def api_admin_user_action():
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True)
 
-# ---------- GET /api/admin/teams ----------
-# ─────────────────── /api/admin/teams ──────────────────────────
 @app.get('/api/admin/teams')
 @admin_required
 def api_admin_teams():
@@ -746,7 +695,6 @@ def api_admin_teams():
         sort = 'team_id'
     dir_sql = 'ASC' if order == 'asc' else 'DESC'
 
-    # убираем прямое JOIN по team_members, ищем через EXISTS
     base_from = "FROM teams t"
     where, params = '', []
     if q:
@@ -790,7 +738,6 @@ def api_admin_teams():
     pages = (total + PER_PAGE - 1)//PER_PAGE
     return jsonify(ok=True, data={'teams':teams,'page':page,'pages':pages})
 
-# ---------- POST /api/admin/team_action ----------
 @app.post('/api/admin/team_action')
 @admin_required
 def api_admin_team_action():
@@ -811,10 +758,6 @@ def api_admin_team_action():
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True)
 
-###############################################################################
-#  Вспомогательные
-###############################################################################
-
 def unique_code(conn, length: int = 6) -> str:
     cur = conn.cursor()
     while True:
@@ -822,10 +765,6 @@ def unique_code(conn, length: int = 6) -> str:
         cur.execute("SELECT 1 FROM teams WHERE invite_code=%s", (code,))
         if not cur.fetchone():
             return code
-
-###############################################################################
-#  Запуск
-###############################################################################
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

@@ -21,7 +21,7 @@
   </header>
 
   <main style="padding:24px">
-    <!-- поле ввода кода + btn -->
+    <!-- ввод кода-->
     <div id="codeBox" class="content-box" style="max-width:340px;margin-bottom:20px;display:none"></div>
 
     <div id="activeSection" class="card-grid"></div>
@@ -45,7 +45,7 @@
       else    { await loadActive(); }
     }
 
-    /* ───────────────────────────────────── 1) список активных / поле ввода ── */
+    /* список активных / поле ввода  */
     async function loadActive(){
       page = 1;
       $('#manageSection').style.display = 'none';
@@ -84,7 +84,7 @@
       });
     }
 
-    /* ───────────────────────────────────────── 2) управление выбранным ── */
+    /*управление выбранным  */
     async function loadManage(){
       $('#activeSection').style.display = 'none';
       $('#codeBox').style.display      = 'none';
@@ -120,7 +120,7 @@
           </td>`:''}
         </tr>`).join('');
 
-      /* pagination html */
+
       let pagHTML = '<div class="table-pagination" style="text-align:right;margin-top:8px">';
       for(let p=1;p<=pages;p++){
         pagHTML += p===page ? `<strong>${p}</strong>` : `<a href="#" data-p="${p}">${p}</a>`;
@@ -150,14 +150,14 @@
         </table>
         ${pagHTML}`;
 
-      /* ── кнопки ── */
+      /*  кнопки  */
       $('#backBtn').onclick = ()=>{ code=''; params.delete('code'); history.replaceState(null,'','?'+params); loadActive(); };
       $('#refreshBtn').onclick = ()=> loadManage();
 
       if(status==='waiting') $('#startBtn').onclick = async ()=>{ await patch({start:true}); };
       if(status!=='finished' && status!=='waiting') $('#finishBtn').onclick = async ()=>{ await patch({finish:true}); };
 
-      // Валидация и отправка очков / DQ ------------------------------------
+      // Валидация и отправка очков / DQ
       function promptPoints(){
         let pts = prompt('Введите количество очков (1-100):');
         pts = Number(pts);
@@ -191,7 +191,7 @@
         };
       });
 
-      /* pagination links */
+      
       $$('#manageSection .table-pagination a[data-p]').forEach(a=>{
         a.onclick = e=>{ e.preventDefault(); page=parseInt(a.dataset.p); loadManage(); };
       });
@@ -202,31 +202,170 @@
       }
     }
 
-    /* initial load */
+    
     load();
   </script>
 
   <style>
-    .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-bottom:24px}
-    .card{border:1px solid #4a5a75;border-radius:8px;padding:14px;background:#1f293e;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.2)}
-    .card h4{margin:0 0 6px}
-    .btn{background:#2563eb;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
-    .btn-outline{background:#2a3a5a;color:#4d9eff;border:1px solid #4d9eff}
-    .content-box{border:1px solid #4a5a75;border-radius:8px;padding:18px;background:#1f293e;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.2)}
-    .admin-table{border-collapse:collapse;width:100%;margin-top:16px;color:#fff}
-    .admin-table th,.admin-table td{padding:6px 8px;border:1px solid #375176;text-align:center}
-    .admin-table thead{background:#22304d;font-weight:600}
-    select{background:#2a3a5a;color:#fff;border:1px solid #375176;border-radius:4px;padding:4px}
-    .table-pagination a,strong{margin-left:4px}
+/*раскладываем карточки в сетку */
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
 
-    /* --- action‑menu styles --- */
-    .action-wrapper{position:relative;display:inline-block}
-    .action-btn{cursor:pointer;text-decoration:underline;color:#4d9eff;font-size:14px}
-    .action-menu{display:none;position:absolute;right:0;top:20px;background:#1f293e;border:1px solid #4a5a75;border-radius:6px;box-shadow:0 2px 6px rgba(0,0,0,.15);min-width:180px;z-index:20}
-    .action-menu button{display:block;width:100%;border:none;background:none;text-align:left;padding:8px 12px;font-size:14px;cursor:pointer;color:#fff}
-    .action-menu button:hover{background:#22304d}
-    .action-menu .red{background:#e05555;color:#fff}
-    .action-wrapper:hover .action-menu{display:block}
+/* Каждая карточка со своей рамочкой и тенями */
+.card {
+    border: 1px solid #4a5a75;
+    border-radius: 8px;
+    padding: 14px;
+    background: #1f293e;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+}
+
+/* Заголовки h4 внутри карточек без лишних отступов */
+.card h4 {
+    margin: 0 0 6px;
+}
+
+/* Простой стиль для кнопок */
+.btn {
+    background: #2563eb;
+    color: #fff;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+/* Вариант кнопки «outline» */
+.btn-outline {
+    background: #2a3a5a;
+    color: #4d9eff;
+    border: 1px solid #4d9eff;
+}
+
+/* для любого контента с рамкой и фончиком */
+.content-box {
+    border: 1px solid #4a5a75;
+    border-radius: 8px;
+    padding: 18px;
+    background: #1f293e;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+}
+
+/* админка */
+.admin-table {
+    border-collapse: collapse;
+    width: 100%;
+    margin-top: 16px;
+    color: #fff;
+}
+
+/* Подгоняем отступы в заголовках и ячейках */
+.admin-table th,
+.admin-table td {
+    padding: 6px 8px;
+    border: 1px solid #375176;
+    text-align: center;
+}
+
+/* Фон шапки таблицы и жирность */
+.admin-table thead {
+    background: #22304d;
+    font-weight: 600;
+}
+
+/* Селект с тёмным фоном и обводкой */
+select {
+    background: #2a3a5a;
+    color: #fff;
+    border: 1px solid #375176;
+    border-radius: 4px;
+    padding: 4px;
+}
+
+/* Отступы между ссылками пагинации */
+.table-pagination a,
+.table-pagination strong {
+    margin-left: 4px;
+}
+
+/* Ссылки пагинации */
+.table-pagination a {
+    color: #4d9eff;
+    text-decoration: none;
+}
+
+/* подчёркивания при наведении */
+.table-pagination a:hover {
+    text-decoration: underline;
+}
+
+/* номер страницы — белый и жирный */
+.table-pagination strong {
+    color: #fff;
+    font-weight: bold;
+}
+
+/* Обёртка для меню действий — чтобы позиционировать меню */
+.action-wrapper {
+    position: relative;
+    display: inline-block;
+}
+
+/* Сам «кнопочный» триггер меню */
+.action-btn {
+    cursor: pointer;
+    text-decoration: underline;
+    color: #4d9eff;
+    font-size: 14px;
+}
+
+/* скрытое по умолчанию меню с действиями */
+.action-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 20px;
+    background: #1f293e;
+    border: 1px solid #4a5a75;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .15);
+    min-width: 180px;
+    z-index: 20;
+}
+
+/*  внутри этого меню */
+.action-menu button {
+    display: block;
+    width: 100%;
+    border: none;
+    background: none;
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    color: #fff;
+}
+
+.action-menu button:hover {
+    background: #22304d;
+}
+
+/* красная */
+.action-menu .red {
+    background: #e05555;
+    color: #fff;
+}
+
+/* показываем меню, когда обёртку «ховерат» */
+.action-wrapper:hover .action-menu {
+    display: block;
+}
   </style>
 </body>
 </html>
