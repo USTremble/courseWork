@@ -1,96 +1,181 @@
-<!DOCTYPE html><html lang="ru"><head>
-  <meta charset="UTF-8"><title>Проведение события</title>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Проведение события</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="/static/css/style.css"></head><body>
-  
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
   <nav class="sidebar"><div class="logo">IB Competition</div><div id="navLinks"></div></nav>
   <header class="topbar">
-    <div class="top-title">Проведение события</div>
-    <div class="avatar-menu"><span id="uname"></span>
+    <div class="top-title" id="pageTitle">Проведение события</div>
+    <div class="avatar-menu">
+      <span id="uname"></span>
       <img src="/static/default-avatar.png" class="avatar" id="aBtn">
-      <div class="dropdown" id="dd"><a href="/profile.html">Профиль</a><a href="#" id="lo">Выйти</a></div></div>
+      <div class="dropdown" id="dd">
+        <a href="/profile.html">Профиль</a>
+        <a href="#" id="lo">Выйти</a>
+      </div>
+    </div>
   </header>
-  
-  <main style="padding-bottom:60px">
-    <h1>Проведение события</h1>
-    <div id="root"></div>
+
+  <main style="padding:24px">
+    <!-- поле ввода кода + btn -->
+    <div id="codeBox" class="content-box" style="max-width:340px;margin-bottom:20px;display:none"></div>
+
+    <div id="activeSection" class="card-grid"></div>
+    <div id="manageSection" class="content-box" style="display:none"></div>
   </main>
-  
+
   <script type="module">
-  import { initCommon } from '/static/js/common.js';
-  await initCommon('Проведение события');
-  
-  const html=s=>{const t=document.createElement('template');t.innerHTML=s.trim();return t.content.firstChild;};
-  const qs=new URLSearchParams(location.search); const code=qs.get('code')||'';
-  const $=q=>document.querySelector(q);
-  
-  async function load(){
-    const root=$('#root'); root.innerHTML='Загрузка…';
-    if(code){
-      const r=await fetch('/api/mod/events/'+code,{credentials:'include'});
-      if(!r.ok){root.textContent=(await r.json()).msg||'Код не найден';return;}
-      const d=(await r.json()).data; const ev=d.event; const teams=d.teams;
-      root.innerHTML=''; root.appendChild(html(`<div class="content-box">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <h2 style="margin:0">${ev[1]} <small>(${ev[2]})</small></h2>
-          <a href="/mod_manage.html" style="font-size:22px;text-decoration:none">&#10005;</a></div>
-        <div id="actions" style="margin:16px 0"></div>
-        <table class="admin-table"><thead><tr>
-          <th>#</th><th>Команда</th><th>Очки</th><th>Последний ответ / время</th>
-          ${ev[2]!='finished'?'<th>Действие</th>':''}</tr></thead><tbody id="tb"></tbody></table></div>`));
-      if(ev[2]=='waiting') $('#actions').appendChild(html(`<button class="btn" id="start">Начать событие</button>`));
-      if(ev[2]!='finished' && ev[2]!='waiting') $('#actions')
-        .appendChild(html(`<button class="btn" id="finish">Завершить событие</button>`));
-      $('#start')?.addEventListener('click',()=>patch({start:true}));
-      $('#finish')?.addEventListener('click',()=>patch({finish:true}));
-      const body=$('#tb');
-      teams.forEach((t,i)=>{
-        body.appendChild(html(`<tr>
-          <td>${i+1}</td><td style="text-align:left">${t[1]}</td><td>${t[2]}</td>
-          <td style="text-align:left">${t[3]} <small>${t[4]}</small></td>
-          ${ev[2]!='finished'?`<td><select data-tid="${t[0]}">
-            <option disabled selected>⋮</option><option value="+1">+ очко</option>
-            <option value="-1">− очко</option><option value="dq">Дисквалифицировать</option>
-          </select></td>`:''}</tr>`));
-      });
-      document.querySelectorAll('select[data-tid]').forEach(sel=>sel.onchange=()=>{
-        const v=sel.value; sel.selectedIndex=0;
+    import { initCommon } from '/static/js/common.js';
+    const me = await initCommon('Проведение события');
+    if (!['admin','moderator'].includes(me.role)) location.replace('/dashboard.html');
+
+    const $  = s=>document.querySelector(s);
+    const $$ = s=>document.querySelectorAll(s);
+    const params = new URLSearchParams(location.search);
+    let code = params.get('code') || '';
+    const PER_PAGE = 15;             // строк на страницу в таблице команд
+    let page = 1;
+
+    async function load(){
+      if(code){ await loadManage(); }
+      else    { await loadActive(); }
+    }
+
+    /* ───────────────────────────────────── 1) список активных / поле ввода ── */
+    async function loadActive(){
+      page = 1;
+      $('#manageSection').style.display = 'none';
+      $('#activeSection').style.display = '';
+
+      // показать box с полем ввода кода + открыть
+      $('#codeBox').style.display = 'block';
+      $('#codeBox').innerHTML = `
+        <label style="display:block;margin-bottom:6px">Код события</label>
+        <input id="codeInput" value="" placeholder="Код" maxlength="16" style="padding:6px 8px;width:120px">
+        <button id="openBtn" class="btn" style="margin-left:8px">Открыть</button>`;
+      $('#openBtn').onclick = ()=>{
+        const v = $('#codeInput').value.trim();
         if(!v) return;
-        if(v==='dq' && !confirm('Дисквалифицировать команду?')) return;
-        patch(v==='dq'?{dq:true,team_id:sel.dataset.tid}:{delta:+v,team_id:sel.dataset.tid});
+        code = v; params.set('code',code); history.replaceState(null,'','?'+params); load();
+      };
+
+      $('#activeSection').innerHTML = `<p>Загрузка…</p>`;
+      const res = await fetch('/api/mod/events', {credentials:'include'});
+      if(!res.ok){ $('#activeSection').innerHTML = `<p>Ошибка API: ${res.status}</p>`; return; }
+      const events = (await res.json()).data;
+      if(!events.length){ $('#activeSection').innerHTML = `<p>Нет ожидающих или текущих событий.</p>`; return; }
+
+      $('#activeSection').innerHTML = events.map(e=>`
+        <div class="card">
+          <h4>${e.name}</h4>
+          <p>${e.description}</p>
+          <p>Тип: ${e.type.toUpperCase()}</p>
+          <p>Статус: ${e.status==='waiting'?'Ожидание':'В процессе'}</p>
+          <p>Команд: ${e.teams}</p>
+          <button class="btn" data-code="${e.code}">Провести событие</button>
+        </div>`).join('');
+
+      $$('#activeSection button[data-code]').forEach(b=>{
+        b.onclick = ()=>{ code=b.dataset.code; params.set('code',code); history.replaceState(null,'','?'+params); load(); };
       });
-    }else{
-      const r=await fetch('/api/mod/events',{credentials:'include'});
-      const list=(await r.json()).data; root.innerHTML='';
-      root.appendChild(html(`<form id="open" class="content-box" style="max-width:340px">
-        <label>Код события</label><input name="code" required>
-        <button class="btn" style="margin-top:6px">Открыть</button></form>`));
-      $('#open').onsubmit=e=>{e.preventDefault();location.href='/mod_manage.html?code='+new FormData(e.target).get('code');};
-      if(list.length){
-        root.appendChild(html('<h2 style="margin-top:28px">Ожидающие / Идут</h2><div class="card-grid" id="cg"></div>'));
-        const cg=$('#cg');
-        list.forEach(ev=>{
-          cg.appendChild(html(`<div class="card"><h4>${ev.name}</h4><p>${ev.description}</p>
-            <p>Тип: ${ev.type.toUpperCase()}</p><p>Статус: ${ev.status}</p>
-            <p>Команд: ${ev.teams}</p>
-            <a class="btn" href="/mod_manage.html?code=${ev.code}">Провести</a></div>`));
-        });
+    }
+
+    /* ───────────────────────────────────────── 2) управление выбранным ── */
+    async function loadManage(){
+      $('#activeSection').style.display = 'none';
+      $('#codeBox').style.display      = 'none';
+      $('#manageSection').style.display= 'block';
+      $('#manageSection').innerHTML    = `<p>Загрузка…</p>`;
+
+      const res = await fetch(`/api/mod/events/${code}?page=${page}&per=${PER_PAGE}`, {credentials:'include'});
+      if(!res.ok){ alert('Событие не найдено'); code=''; params.delete('code'); history.replaceState(null,'','?'+params); return loadActive(); }
+      const {event,teams,total} = (await res.json()).data; // total – всего строк для пагинации
+      const [eid,name,status] = event;
+      const pages = Math.max(1, Math.ceil(total/PER_PAGE));
+
+      let controlBtn='';
+      if(status==='waiting')      controlBtn = `<button id="startBtn"  class="btn">Начать событие</button>`;
+      else if(status!=='finished') controlBtn = `<button id="finishBtn" class="btn">Завершить событие</button>`;
+
+      const rows = teams.map((t,i)=>`
+        <tr>
+          <td>${(page-1)*PER_PAGE + i + 1}</td>
+          <td style="text-align:left">${t[1]}</td>
+          <td>${t[2]}</td>
+          <td style="text-align:left">${t[3]} <small>${t[4]}</small></td>
+          ${status!=='finished'?`<td><select data-tid="${t[0]}"><option disabled selected>⋮</option><option value="+1">+ очко</option><option value="-1">− очко</option><option value="dq">Дисквалификация</option></select></td>`:''}
+        </tr>`).join('');
+
+      /* pagination html */
+      let pagHTML = '<div class="table-pagination" style="text-align:right;margin-top:8px">';
+      for(let p=1;p<=pages;p++){
+        pagHTML += p===page ? `<strong>${p}</strong>` : `<a href="#" data-p="${p}">${p}</a>`;
+      }
+      pagHTML += '</div>';
+
+      $('#manageSection').innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h2>${name} <small>(${status})</small></h2>
+          <div>
+            <button id="refreshBtn" class="btn btn-outline" style="margin-right:6px">Обновить таблицу</button>
+            <button id="backBtn"    class="btn btn-outline">← Назад</button>
+          </div>
+        </div>
+        <div style="margin:16px 0">${controlBtn}</div>
+        <table class="admin-table">
+          <thead>
+            <tr><th>#</th><th>Команда</th><th>Очки</th><th>Последний ответ/время</th>${status!=='finished'?'<th>Действие</th>':''}</tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+        ${pagHTML}`;
+
+      /* ── кнопки ── */
+      $('#backBtn').onclick = ()=>{ code=''; params.delete('code'); history.replaceState(null,'','?'+params); loadActive(); };
+      $('#refreshBtn').onclick = ()=> loadManage();
+
+      if(status==='waiting') $('#startBtn').onclick = async ()=>{ await patch({start:true}); };
+      if(status!=='finished' && status!=='waiting') $('#finishBtn').onclick = async ()=>{ await patch({finish:true}); };
+
+      $$('#manageSection select[data-tid]').forEach(sel=>{
+        sel.onchange = async ()=>{
+          const tid=sel.dataset.tid,v=sel.value; sel.selectedIndex=0;
+          if(v==='dq' && !confirm('Дисквалифицировать команду?')) return;
+          await patch(v==='dq'?{dq:true,team_id:tid}:{delta:v,team_id:tid});
+        };
+      });
+
+      /* pagination links */
+      $$('#manageSection .table-pagination a[data-p]').forEach(a=>{
+        a.onclick = e=>{ e.preventDefault(); page=parseInt(a.dataset.p); loadManage(); };
+      });
+
+      async function patch(body){
+        await fetch(`/api/mod/events/${code}`,{method:'PATCH',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+        await loadManage();
       }
     }
-  }
-  async function patch(body){await fetch('/api/mod/events/'+code,{method:'PATCH',credentials:'include',
-    headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); load();}
-  load();
+
+    /* initial load */
+    load();
   </script>
-  
+
   <style>
-  .content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-  .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px;margin-top:16px}
-  .card{border:1px solid #c7d9e1;border-radius:8px;padding:14px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-  .admin-table{border-collapse:collapse;width:100%;margin-top:8px}
-  .admin-table th,.admin-table td{padding:6px 8px;border:1px solid #d4dee4;text-align:center}
-  .admin-table thead{background:#f0f6fa;font-weight:600}
-  .btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+    .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:16px;margin-bottom:24px}
+    .card{border:1px solid #4a5a75;border-radius:8px;padding:14px;background:#1f293e;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+    .card h4{margin:0 0 6px}
+    .btn{background:#2563eb;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+    .btn-outline{background:#2a3a5a;color:#4d9eff;border:1px solid #4d9eff}
+    .content-box{border:1px solid #4a5a75;border-radius:8px;padding:18px;background:#1f293e;color:#fff;box-shadow:0 2px 6px rgba(0,0,0,.2)}
+    .admin-table{border-collapse:collapse;width:100%;margin-top:16px;color:#fff}
+    .admin-table th,.admin-table td{padding:6px 8px;border:1px solid #375176;text-align:center}
+    .admin-table thead{background:#22304d;font-weight:600}
+    select{background:#2a3a5a;color:#fff;border:1px solid #375176;border-radius:4px;padding:4px}
+    .table-pagination a,strong{margin-left:4px}
   </style>
-  </body></html>
-  
+</body>
+</html>

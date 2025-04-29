@@ -1,56 +1,119 @@
-<!DOCTYPE html><html lang="ru"><head>
-  <meta charset="UTF-8"><title>Создать событие</title>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Создать событие</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <link rel="stylesheet" href="/static/css/style.css"></head><body>
-  
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
   <nav class="sidebar"><div class="logo">IB Competition</div><div id="navLinks"></div></nav>
   <header class="topbar">
-    <div class="top-title">Создать событие</div>
-    <div class="avatar-menu"><span id="uname"></span>
+    <div class="top-title" id="pageTitle">Создать событие</div>
+    <div class="avatar-menu">
+      <span id="uname"></span>
       <img src="/static/default-avatar.png" class="avatar" id="aBtn">
-      <div class="dropdown" id="dd"><a href="/profile.html">Профиль</a><a href="#" id="lo">Выйти</a></div></div>
+      <div class="dropdown" id="dd">
+        <a href="/profile.html">Профиль</a>
+        <a href="#" id="lo">Выйти</a>
+      </div>
+    </div>
   </header>
-  
-  <main style="padding-bottom:60px">
-    <h1>Создать событие</h1>
-    <div id="msg" class="content-box" style="display:none;margin-bottom:18px"></div>
-  
-    <form id="cForm" class="content-box" style="max-width:460px">
-      <label>Код (≤16)</label><input name="code" maxlength="16">
-      <label>Название</label><input name="name" required>
-      <label>Описание</label><textarea name="desc"></textarea>
-      <label>Тип</label>
-      <select name="ev_type">
-        <option value="quiz">Квиз</option><option value="ctf">CTF</option>
-      </select>
-      <label>Ответ</label><input name="answer" required>
-      <label>PDF-задание</label><input type="file" name="task" accept=".pdf" required>
-      <button class="btn" style="margin-top:12px">Создать</button>
+
+  <main style="padding:24px">
+    <form id="createForm" class="content-box" style="max-width:480px;margin:auto" enctype="multipart/form-data">
+      <h2>Новое событие</h2>
+      <label>Код события (≤16 символов)<br>
+        <input name="code" maxlength="16" required placeholder="Уникальный код">
+      </label>
+      <label>Название события (≤50 символов)<br>
+        <input name="name" maxlength="50" required placeholder="Например: Олимпиада по математике">
+      </label>
+      <label>Описание (≤150 символов)<br>
+        <textarea name="desc" rows="4" maxlength="150" required placeholder="Коротко о задании…"></textarea>
+      </label>
+      <label>Тип события<br>
+        <select name="ev_type" required>
+          <option value="">— выберите —</option>
+          <option value="quiz">Квиз</option>
+          <option value="ctf">CTF</option>
+        </select>
+      </label>
+      <label>Правильный ответ (≤20 символов)<br>
+        <input name="answer" maxlength="20" required placeholder="Точный ответ для проверки">
+      </label>
+      <label>PDF-задание<br>
+        <input type="file" name="task" accept=".pdf" required>
+      </label>
+      <button class="btn" type="submit" style="margin-top:12px">Создать событие</button>
     </form>
+
+    <div id="msg" class="content-box" style="max-width:480px;margin:20px auto;display:none"></div>
   </main>
-  
+
   <script type="module">
-  import { initCommon } from '/static/js/common.js';
-  await initCommon('Создать событие');
-  
-  const $=q=>document.querySelector(q);
-  $('#cForm').onsubmit=async e=>{
-    e.preventDefault();
-    const fd=new FormData(e.target);
-    const r=await fetch('/api/mod/events',{method:'POST',credentials:'include',body:fd});
-    const box=$('#msg'); box.style.display='block';
-    if(r.ok){
-      const j=await r.json();
-      box.innerHTML=`Событие создано. <a href="/mod_manage.html?code=${j.data.code}">Перейти к проведению</a>`;
-    }else{
-      box.textContent=(await r.json()).msg||'Ошибка';
-    }
-  };
+    import { initCommon } from '/static/js/common.js';
+    const me = await initCommon('Создать событие');
+    if (!['admin','moderator'].includes(me.role)) location.replace('/dashboard.html');
+
+    const form = document.getElementById('createForm');
+    const msg  = document.getElementById('msg');
+
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const data = new FormData(form);
+
+      // доп-валидация на случай обхода maxlength
+      if (data.get('name').length   > 50 ||
+          data.get('desc').length   > 150 ||
+          data.get('answer').length > 20 ||
+          data.get('code').length   > 16) {
+        alert('Превышена максимальная длина одного из полей');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/mod/events', {
+          method: 'POST',
+          credentials: 'include',
+          body: data
+        });
+        const j = await res.json();
+        if (!res.ok) throw new Error(j.msg || `Ошибка ${res.status}`);
+
+        msg.innerHTML = `
+          <p>Событие «<strong>${j.data.name}</strong>» успешно создано.</p>
+          <p>Хотите <a href="/mod_manage.html?code=${j.data.code}">перейти к проведению</a>?</p>
+        `;
+        msg.style.display = 'block';
+      } catch (err) {
+        alert('Не удалось создать событие: ' + err.message);
+      }
+    };
   </script>
-  
+
   <style>
-  .content-box{border:1px solid #c7d9e1;border-radius:8px;padding:18px;box-shadow:0 2px 6px rgba(0,0,0,.06)}
-  .btn{background:#0084c6;color:#fff;padding:6px 12px;border:none;border-radius:4px;cursor:pointer}
+    .content-box {
+      border: 1px solid #4a5a75;
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.2);
+      background: #1f293e;
+      color: #fff;
+    }
+    label { display:block; margin-bottom:12px; font-size:14px; }
+    input, textarea, select {
+      width:100%; padding:8px; margin-top:4px;
+      border-radius:4px; border:1px solid #375176;
+      background:#2a3a5a; color:#fff;
+    }
+    .btn {
+      background:#2563eb; color:#fff; padding:8px 16px;
+      border:none; border-radius:4px; cursor:pointer;
+    }
+    .btn:hover { background:#1e40af; }
+    #msg p { margin:8px 0; }
+    #msg a { color:#4d9eff; text-decoration:underline; }
   </style>
-  </body></html>
-  
+</body>
+</html>

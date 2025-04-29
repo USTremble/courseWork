@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Flask-REST сервер IB Competition.
-Версия 3.2 — добавлены эндпоинты admin-панели:
-    • GET  /api/admin/users   + POST /api/admin/user_action
-    • GET  /api/admin/teams   + POST /api/admin/team_action
-Всё остальное — как в 3.1.
-"""
-
 import os, random, string
 from functools import wraps
 import psycopg2, psycopg2.errors
@@ -430,53 +421,102 @@ def api_submit_answer(eid):
 #  API: модератор – создать событие
 ###############################################################################
 
-@app.get('/api/mod/events')
+# ─── модератор: создание события ─────────────────────────
+@app.route('/api/mod/events', methods=['POST'])
+@moderator_required
+def api_mod_create():
+    code    = (request.form.get('code') or '').strip()[:16]
+    name    = request.form.get('name','').strip()[:64]
+    desc    = request.form.get('desc','').strip()
+    ev_type = request.form.get('ev_type','').strip()
+    answer  = request.form.get('answer','').strip()
+    pdf     = request.files.get('task')
+
+    # все поля обязательны
+    if not code:
+        return json_error(400, 'Код события обязателен')
+    if not name or not desc or not ev_type or not answer:
+        return json_error(400, 'Все поля должны быть заполнены')
+    if not pdf or not pdf.filename.lower().endswith('.pdf'):
+        return json_error(400, 'Нужен файл в формате PDF')
+
+    # сохраняем PDF
+    filename = secure_filename(pdf.filename)
+    rel_path = os.path.join('tasks', filename)
+    abs_path = os.path.join(app.static_folder, rel_path)
+    pdf.save(abs_path)
+
+    # запись в БД
+    conn = get_db_connection(); cur = conn.cursor()
+    try:
+        cur.execute("""
+            INSERT INTO events(code,name,description,type,answer,file_path,created_by)
+            VALUES (%s,%s,%s,%s,%s,%s,%s)
+            RETURNING code,name
+        """, (code, name, desc, ev_type, answer, rel_path, session['user_id']))
+        code_ret, name_ret = cur.fetchone()
+        conn.commit()
+    except psycopg2.errors.UniqueViolation:
+        conn.rollback()
+        return json_error(409, 'Код события уже занят')
+    finally:
+        cur.close(); conn.close()
+
+    return jsonify(ok=True, data={'code': code_ret, 'name': name_ret})
+
+
+# ─── модератор: список активных (waiting/running) ────────
+@app.route('/api/mod/events', methods=['GET'])
 @moderator_required
 def api_mod_active():
-    """Возвращает список событий со статусом waiting или running."""
-    conn=get_db_connection(); cur=conn.cursor()
+    conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""SELECT e.code,e.name,e.type,e.status,
-                       (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams,
-                       e.description
-                  FROM events e
-                 WHERE e.status IN ('waiting','running')
-                 ORDER BY e.event_id DESC""")
-    data=[{
-        'code':r[0],'name':r[1],'type':r[2],'status':r[3],'teams':r[4],'description':r[5]
+                          (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams,
+                          e.description
+                     FROM events e
+                    WHERE e.status IN ('waiting','running')
+                    ORDER BY e.event_id DESC""")
+    data = [{
+        'code': r[0], 'name': r[1], 'type': r[2],
+        'status': r[3], 'teams': r[4], 'description': r[5]
     } for r in cur.fetchall()]
-    cur.close(); conn.close();
-    return jsonify(ok=True,data=data)
+    cur.close(); conn.close()
+    return jsonify(ok=True, data=data)
 
-###############################################################################
-#  API: модератор – управление событием
-###############################################################################
 
-@app.get("/api/mod/events/<code>")
+# ─── модератор: получить конкретное событие и его команды ──
+@app.route('/api/mod/events/<code>', methods=['GET'])
 @moderator_required
 def api_mod_manage_get(code):
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
     ev = cur.fetchone()
     if not ev:
-        cur.close(); conn.close(); return json_error(404, "Событие не найдено")
-    eid = ev[0]
-    cur.execute(
-        """SELECT et.team_id,t.team_name,et.points,
-                 COALESCE(ls.answer,''),COALESCE(TO_CHAR(ls.ts,'HH24:MI:SS'),'—')
-          FROM event_teams et JOIN teams t USING(team_id)
+        cur.close(); conn.close()
+        return json_error(404, "Событие не найдено")
+    eid,name,status = ev
+
+    cur.execute("""
+        SELECT et.team_id, t.team_name, et.points,
+               COALESCE(ls.answer,'') AS last_ans,
+               COALESCE(TO_CHAR(ls.ts,'HH24:MI:SS'),'—') AS last_ts
+          FROM event_teams et
+          JOIN teams t USING(team_id)
           LEFT JOIN LATERAL (
-                SELECT answer,ts FROM event_submits s
+                SELECT answer, ts FROM event_submits s
                  WHERE s.team_id=et.team_id AND s.event_id=et.event_id
-                 ORDER BY ts DESC LIMIT 1) ls ON TRUE
-         WHERE et.event_id=%s ORDER BY et.id""",
-        (eid,),
-    )
+                 ORDER BY ts DESC LIMIT 1
+          ) ls ON TRUE
+         WHERE et.event_id=%s
+         ORDER BY et.id
+    """, (eid,))
     teams = cur.fetchall()
     cur.close(); conn.close()
-    return jsonify(ok=True, data={"event": ev, "teams": teams})
+    return jsonify(ok=True, data={'event': ev, 'teams': teams})
 
 
-@app.patch("/api/mod/events/<code>")
+# ─── модератор: изменение статуса / очков / дисквалификация ──
+@app.route('/api/mod/events/<code>', methods=['PATCH'])
 @moderator_required
 def api_mod_manage_patch(code):
     data = request.get_json(silent=True) or {}
@@ -484,30 +524,28 @@ def api_mod_manage_patch(code):
     cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code,))
     ev = cur.fetchone()
     if not ev:
-        cur.close(); conn.close(); return json_error(404, "Событие не найдено")
-    eid, status = ev
+        cur.close(); conn.close()
+        return json_error(404, "Событие не найдено")
+    eid,status = ev
 
-    if "start" in data and status == "waiting":
+    if data.get('start') and status=='waiting':
         cur.execute("UPDATE events SET status='running' WHERE event_id=%s", (eid,))
-    elif "finish" in data and status != "finished":
+    elif data.get('finish') and status!='finished':
         cur.execute("UPDATE events SET status='finished' WHERE event_id=%s", (eid,))
-    elif "delta" in data and status != "finished":
-        delta = int(data["delta"])
-        tid   = int(data.get("team_id"))
-        cur.execute(
-            "UPDATE event_teams SET points=GREATEST(points+%s,0) WHERE event_id=%s AND team_id=%s",
-            (delta, eid, tid),
-        )
-    elif "dq" in data and status != "finished":
-        tid = int(data.get("team_id"))
-        cur.execute(
-            "DELETE FROM event_teams WHERE event_id=%s AND team_id=%s", (eid, tid)
-        )
+    elif 'delta' in data and status!='finished':
+        delta = int(data['delta']); tid = int(data['team_id'])
+        cur.execute("UPDATE event_teams SET points=GREATEST(points+%s,0) WHERE event_id=%s AND team_id=%s",
+                    (delta, eid, tid))
+    elif data.get('dq') and status!='finished':
+        tid = int(data['team_id'])
+        cur.execute("DELETE FROM event_teams WHERE event_id=%s AND team_id=%s", (eid, tid))
     else:
-        cur.close(); conn.close(); return json_error(400, "Неверная операция")
+        cur.close(); conn.close()
+        return json_error(400, "Неверная операция")
 
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True)
+
 
 ###############################################################################
 #  API: админ – пользователи
