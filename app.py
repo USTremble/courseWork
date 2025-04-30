@@ -103,7 +103,7 @@ def spa(path=''):
 MAX_LOGIN = 32
 
 @app.post('/api/auth/register')
-def api_register():
+def register():
     d = request.get_json(silent=True) or {}
     u, p, c = d.get('username','').strip(), d.get('password',''), d.get('confirm_password','')
     if p != c:
@@ -122,7 +122,7 @@ def api_register():
     return jsonify(ok=True)
 
 @app.post('/api/auth/login')
-def api_login():
+def login():
     d=request.get_json(silent=True) or {}
     u,p=d.get('username',''),d.get('password','')
     conn=get_db_connection(); cur=conn.cursor()
@@ -135,7 +135,7 @@ def api_login():
 
 @app.post('/change_password')
 @login_required
-def api_change_password():
+def change_password():
     old = request.form.get('old','').strip()
     new = request.form.get('new','').strip()
     if not old or not new:
@@ -155,11 +155,14 @@ def api_change_password():
 
 @app.post('/api/delete_account')
 @login_required
-def api_delete_account():
+def delete_account():
     d = request.get_json(silent=True) or {}
     pwd = d.get('pwd', '')
     conn = get_db_connection()
     cur = conn.cursor()
+
+    if session.get('role') == 'admin':
+        return json_error(403, 'Администратор не может удалить свой аккаунт')
     
     cur.execute("SELECT password FROM users WHERE user_id = %s", (session['user_id'],)) # проверяем, что пароль правильный
     row = cur.fetchone()
@@ -175,13 +178,13 @@ def api_delete_account():
 
 @app.post('/api/auth/logout')
 @login_required
-def api_logout():
+def logout():
     session.clear()
     return jsonify(ok=True)
 
 @app.get('/api/auth/me')
 @login_required
-def api_me():
+def me():
     return jsonify(ok=True, data={
         'user_id'   : session['user_id'],
         'username'  : session['username'],
@@ -192,7 +195,7 @@ def api_me():
 #Dashboard
 @app.get('/api/dashboard')
 @login_required
-def api_dashboard():
+def dashboard():
     conn=get_db_connection(); cur=conn.cursor()
     cur.execute("""
         SELECT e.event_id,e.name,e.type,e.description,
@@ -259,7 +262,7 @@ def current_team():
 #Команда
 @app.get('/api/team')
 @login_required
-def api_team_get():
+def team_get():
     team,members=current_team()
     if not team:
         return jsonify(ok=True,data=None)
@@ -273,7 +276,7 @@ def api_team_get():
 
 @app.get('/api/team/history')
 @login_required
-def api_team_history():
+def team_history():
     page=max(int(request.args.get('page',1)),1)
     team,_=current_team()
     if not team:
@@ -299,22 +302,32 @@ def api_team_history():
 
 @app.post('/api/team/create')
 @login_required
-def api_team_create():
+def team_create():
     if session.get('is_blocked'):
-        return json_error(403,'Аккаунт заблокирован')
-    d=request.get_json(silent=True) or {}
-    name=str(d.get('team_name','')).strip()[:32]
-    if len(name)<3:
-        return json_error(400,'Название слишком короткое')
-    code_raw=str(d.get('invite_code','')).strip()[:16]
-    conn=get_db_connection(); cur=conn.cursor()
-    code=code_raw if code_raw else unique_code(conn)
+        return json_error(403, 'Аккаунт заблокирован')
+    
+    d = request.get_json(silent=True) or {}
+    name = str(d.get('team_name', '')).strip()[:32]
+    
+    if len(name) < 3:
+        return json_error(400, 'Название слишком короткое')
+    
+    code_raw = str(d.get('invite_code', '')).strip()[:16]
+    
+    code = code_raw if code_raw else None
+    
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
     try:
-        cur.execute('INSERT INTO teams(team_name,invite_code) VALUES(%s,%s) RETURNING team_id',(name,code))
-        tid=cur.fetchone()[0]
-        cur.execute("""INSERT INTO team_members(user_id,team_id,active) VALUES(%s,%s,TRUE)
-                     ON CONFLICT (user_id) DO UPDATE SET team_id=EXCLUDED.team_id,active=TRUE""",
-                    (session['user_id'],tid))
+        cur.execute('INSERT INTO teams(team_name, invite_code) VALUES(%s, %s) RETURNING team_id', (name, code))
+        tid = cur.fetchone()[0]
+        
+        cur.execute("""INSERT INTO team_members(user_id, team_id, active) 
+                       VALUES(%s, %s, TRUE) 
+                       ON CONFLICT (user_id) DO UPDATE SET team_id = EXCLUDED.team_id, active = TRUE""",
+                    (session['user_id'], tid))
+        
         conn.commit()
     except UniqueViolation as e:
         conn.rollback()
@@ -324,12 +337,14 @@ def api_team_create():
             return json_error(409, 'Код команды уже занят')
         return json_error(409, 'Команда с такими данными уже существует')
     finally:
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
+    
     return jsonify(ok=True)
 
 @app.post('/api/team/join')
 @login_required
-def api_team_join():
+def team_join():
     if session.get('is_blocked'):
         return json_error(403,'Аккаунт заблокирован')
     d=request.get_json(silent=True) or {}
@@ -348,7 +363,7 @@ def api_team_join():
 
 @app.post('/api/team/leave')
 @login_required
-def api_team_leave():
+def team_leave():
     conn=get_db_connection(); cur=conn.cursor()
     cur.execute('DELETE FROM team_members WHERE user_id=%s',(session['user_id'],))
     if cur.rowcount: conn.commit()
@@ -357,7 +372,7 @@ def api_team_leave():
 
 @app.get("/api/events")
 @login_required
-def api_events_get():
+def events_get():
     team, _ = current_team()
     if not team:
         return jsonify(ok=True, data={"team": None})
@@ -409,7 +424,7 @@ def api_events_get():
 
 @app.post('/api/events/join')
 @login_required
-def api_events_join():
+def events_join():
     team, members = current_team()    #команда и её участники
     if not team:
         return json_error(400, "Нужно состоять в команде")
@@ -446,7 +461,7 @@ def api_events_join():
 
 @app.post("/api/events/leave")
 @login_required
-def api_events_leave():
+def events_leave():
     team, _ = current_team()
     if not team:
         return json_error(400, "Нужно состоять в команде")
@@ -466,7 +481,7 @@ def api_events_leave():
 
 @app.post("/api/events/submit/<int:eid>")
 @login_required
-def api_submit_answer(eid):
+def submit_answer(eid):
     team, _ = current_team()
     if not team:
         return json_error(400, "Нужно состоять в команде")
@@ -489,7 +504,7 @@ def api_submit_answer(eid):
     )
     if ans.lower() == correct.lower():
         cur.execute(
-            "UPDATE event_teams SET points=points+1 WHERE event_id=%s AND team_id=%s",
+            "UPDATE event_teams SET points=points+10 WHERE event_id=%s AND team_id=%s",
             (eid, team["team_id"]),
         )
     conn.commit(); cur.close(); conn.close()
@@ -498,7 +513,7 @@ def api_submit_answer(eid):
 # модерка
 @app.route('/api/mod/events', methods=['POST'])
 @moderator_required
-def api_mod_create():
+def mod_create():
     code    = (request.form.get('code') or '').strip()[:16]
     name    = request.form.get('name','').strip()[:64]
     desc    = request.form.get('desc','').strip()
@@ -541,7 +556,7 @@ def api_mod_create():
 
 @app.route('/api/mod/events', methods=['GET'])
 @moderator_required
-def api_mod_active():
+def mod_active():
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("""SELECT e.code,e.name,e.type,e.status,
                           (SELECT COUNT(*) FROM event_teams et WHERE et.event_id=e.event_id) AS teams,
@@ -558,7 +573,7 @@ def api_mod_active():
 
 @app.route('/api/mod/events/<code>', methods=['GET'])
 @moderator_required
-def api_mod_manage_get(code):
+def mod_manage_get(code):
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT event_id,name,status FROM events WHERE code=%s", (code,))
     ev = cur.fetchone()
@@ -587,7 +602,7 @@ def api_mod_manage_get(code):
 
 @app.route('/api/mod/events/<code>', methods=['PATCH'])
 @moderator_required
-def api_mod_manage_patch(code):
+def mod_manage_patch(code):
     data = request.get_json(silent=True) or {}
     conn = get_db_connection(); cur = conn.cursor()
     cur.execute("SELECT event_id,status FROM events WHERE code=%s", (code,))
@@ -618,7 +633,7 @@ def api_mod_manage_patch(code):
 #адмика
 @app.get('/api/admin/users')
 @admin_required
-def api_admin_users():
+def admin_users():
     page  = max(int(request.args.get('page', 1)), 1)
     q     = request.args.get('q', '').strip()
     sort  = request.args.get('sort', 'user_id')
@@ -676,26 +691,45 @@ def api_admin_users():
 
 @app.post('/api/admin/user_action')
 @admin_required
-def api_admin_user_action():
-    d=request.get_json(silent=True) or {}
+def admin_user_action():
+    d = request.get_json(silent=True) or {}
     uid, act = d.get('uid'), d.get('act')
-    if not uid or act not in {'delete','moder','toggle'}:
-        return json_error(400,'bad params')
 
-    conn=get_db_connection(); cur=conn.cursor()
-    if act=='delete':
-        cur.execute("DELETE FROM users WHERE user_id=%s",(uid,))
-        if str(uid)==str(session.get('user_id')): session.clear()
-    elif act=='moder':
-        cur.execute("UPDATE users SET role='moderator' WHERE user_id=%s",(uid,))
-    elif act=='toggle':
-        cur.execute("UPDATE users SET is_blocked=NOT is_blocked WHERE user_id=%s",(uid,))
-    conn.commit(); cur.close(); conn.close()
-    return jsonify(ok=True)
+    if uid == session.get('user_id') and act == 'moder':
+
+        return json_error(403, 'Невозможно изменить роль для самого себя') 
+
+    if not uid or act not in {'delete', 'moder', 'toggle'}:
+
+        return json_error(400, 'Некорректные параметры')
+
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    try:
+        if act == 'delete':
+            cur.execute("DELETE FROM users WHERE user_id=%s", (uid,))
+            if str(uid) == str(session.get('user_id')):
+                session.clear()
+        elif act == 'moder':
+            cur.execute("UPDATE users SET role='moderator' WHERE user_id=%s", (uid,))
+        elif act == 'toggle':
+            cur.execute("UPDATE users SET is_blocked=NOT is_blocked WHERE user_id=%s", (uid,))
+
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        return json_error(500, f"Ошибка выполнения операции: {str(e)}")
+    finally:
+        cur.close()
+        conn.close()
+
+    return jsonify(ok=True) 
 
 @app.get('/api/admin/teams')
 @admin_required
-def api_admin_teams():
+def admin_teams():
     page  = max(int(request.args.get('page', 1)), 1)
     q     = request.args.get('q', '').strip()
     sort  = request.args.get('sort', 'team_id')
@@ -749,7 +783,7 @@ def api_admin_teams():
 
 @app.post('/api/admin/team_action')
 @admin_required
-def api_admin_team_action():
+def admin_team_action():
     d=request.get_json(silent=True) or {}
     tid, act = d.get('tid'), d.get('act')
     if not tid or act not in {'delete','disband','kick'}:
@@ -766,14 +800,6 @@ def api_admin_team_action():
         cur.execute("DELETE FROM team_members WHERE team_id=%s AND user_id=%s",(tid,uid))
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True)
-
-def unique_code(conn, length: int = 6) -> str:
-    cur = conn.cursor()
-    while True:
-        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=length))
-        cur.execute("SELECT 1 FROM teams WHERE invite_code=%s", (code,))
-        if not cur.fetchone():
-            return code
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
