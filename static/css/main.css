@@ -8,6 +8,20 @@
     margin-bottom: 24px;
 }
 
+.content-box h3 {
+    margin-top: 8px;    
+    margin-bottom: 8px;  
+}
+  
+
+#mList {
+    margin-top: 8px;    
+    padding-left: 20px;  
+}
+#mList li {
+    margin-bottom: 4px;
+}
+
 /* Таблица */
 .admin-table {
     border-collapse: collapse;
@@ -36,7 +50,7 @@
     color: inherit;
 }
 .admin-table th a:hover {
-    text-decoration: underline;
+    text-decoration: underline dotted;
 }
 .admin-table th a:visited {
     color: inherit;
@@ -73,7 +87,7 @@
 }
 .action-btn {
     cursor: pointer;
-    text-decoration: underline;
+    text-decoration: none;
     color: #4d9eff;
     font-size: 14px;
 }
@@ -128,7 +142,8 @@
     background-color: #3a8ae8;
 }
 .btn-primary {
-    background-color: #4d9eff;
+    background-color: #2563eb;
+    margin-left: 8px;
 }
 .btn-primary:hover {
     background-color: #3a8ae8;
@@ -163,7 +178,8 @@
 
 label {
     display: block;
-    margin-bottom: 12px;
+    margin-top: 6px;
+    margin-bottom: 1px;
     font-size: 14px;
 }  
 
@@ -223,4 +239,60 @@ input, textarea, select {
 
 .page--profile #pwdMsg, #delMsg {
     font-size: 14px;
+}
+
+.modal {
+    display:none;
+    position:fixed;
+    inset:0;
+    background:rgba(0,0,0,0.55);
+    z-index:999;
+    align-items:center;
+    justify-content:center;
+    padding:20px;
+}
+.modal-body {
+    background:#1f293e;
+    color:#fff;
+    border:1px solid #4a5a75;
+    border-radius:8px;
+    padding:24px;
+    max-width:600px;
+    width:100%;
+    box-shadow:0 4px 12px rgba(0,0,0,0.25);
+}
+.modal-body h3,
+.modal-body p,
+.modal-body table {
+    margin-bottom:12px;
+}
+.modal-body table {
+    width:100%;
+    border-collapse:collapse;
+}
+.modal-body th {
+    padding:8px;
+    border:1px solid #375176;
+    text-align:center;
+    color:#fff;
+}
+.modal-body td {
+    padding:8px;
+    border:1px solid #375176;
+    text-align:center;
+    color:#fff;
+}
+.modal-body thead {
+    background:#22304d;
+    font-weight:600;
+}
+.close-btn {
+    display:block;
+    margin:20px auto 0;
+    background:#2563eb;
+    color:#fff;
+    padding:8px 16px;
+    border:none;
+    border-radius:4px;
+    cursor:pointer;
 }

@@ -5,6 +5,7 @@
   <title>Главная</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
   
@@ -28,6 +29,7 @@
       <p>Погрузитесь в атмосферу соревнований и готовьтесь к новым вызовам!</p>
       
     </section>
+    <h2>Прошедшие события</h2>
   
     <h2 id="noev" style="margin-top:36px;display:none">Завершённых событий пока нет.</h2>
     <div class="card-grid" id="evGrid"></div>
@@ -87,94 +89,6 @@
     });
   </script>
   
-  <style>
-    .content-box {
-      border:1px solid #c7d9e1;
-      border-radius:8px;
-      padding:18px;
-      box-shadow:0 2px 6px rgba(0,0,0,.06);
-    }
-    .card-grid {
-      display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(240px,1fr));
-      gap:16px;
-      margin-top:16px;
-    }
-    .card {
-      border:1px solid #c7d9e1;
-      border-radius:8px;
-      padding:14px;
-      box-shadow:0 2px 6px rgba(0,0,0,.06);
-    }
-    .card h4 { margin:0 0 6px; }
-    .btn {
-      background:#0084c6;
-      color:#fff;
-      padding:6px 12px;
-      border:none;
-      border-radius:4px;
-      cursor:pointer;
-      margin-top:6px;
-    }
-
-    /* МОДАЛКА */
-    .modal {
-      display:none;
-      position:fixed;
-      inset:0;
-      background:rgba(0,0,0,.55);
-      z-index:999;
-      align-items:center;
-      justify-content:center;
-      padding:20px;
-    }
-    .modal-body {
-      background:#1f293e;
-      color:#fff;
-      border:1px solid #4a5a75;
-      border-radius:8px;
-      padding:24px;
-      max-width:600px;
-      width:100%;
-      box-shadow:0 4px 12px rgba(0,0,0,.25);
-    }
-    .modal-body h3,
-    .modal-body p,
-    .modal-body table {
-      margin-bottom:12px;
-    }
-    .modal-body table {
-      width:100%;
-      border-collapse:collapse;
-    }
-
-    .modal-body th {
-      padding:8px;
-      border:1px solid #375176;
-      text-align:center;
-      color:#fff;
-    }
-
-    .modal-body td {
-      padding:8px;
-      border:1px solid #375176;
-      text-align:center;
-      color:#ffffff;
-    }
-    .modal-body thead {
-      background:#22304d;
-      font-weight:600;
-    }
-    .close-btn {
-      display:block;
-      margin:20px auto 0;
-      background:#2563eb;
-      color:#fff;
-      padding:8px 16px;
-      border:none;
-      border-radius:4px;
-      cursor:pointer;
-    }
-  </style>
+  
 </body>
 </html>
