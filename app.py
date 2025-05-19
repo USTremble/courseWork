@@ -504,7 +504,7 @@ def submit_answer(eid):
     )
     if ans.lower() == correct.lower():
         cur.execute(
-            "UPDATE event_teams SET points=points+10 WHERE event_id=%s AND team_id=%s",
+            "UPDATE event_teams SET points=points+1 WHERE event_id=%s AND team_id=%s",
             (eid, team["team_id"]),
         )
     conn.commit(); cur.close(); conn.close()
@@ -800,6 +800,7 @@ def admin_team_action():
         cur.execute("DELETE FROM team_members WHERE team_id=%s AND user_id=%s",(tid,uid))
     conn.commit(); cur.close(); conn.close()
     return jsonify(ok=True)
+
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

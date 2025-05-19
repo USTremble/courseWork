@@ -1,0 +1,226 @@
+.content-box {
+    border: 1px solid #475d7d;
+    border-radius: 8px;
+    padding: 18px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.2);
+    background: #1a2335;
+    color: #fff;
+    margin-bottom: 24px;
+}
+
+/* Таблица */
+.admin-table {
+    border-collapse: collapse;
+    width: 100%;
+    color: #fff;
+    margin-top: 16px;
+    margin-bottom: 16px;
+}
+.admin-table th,
+.admin-table td {
+    padding: 8px 12px;
+    border: 1px solid #5e7296;
+    text-align: center;
+}
+.admin-table thead {
+    background: #22304d;
+    font-weight: 600;
+}
+.admin-table tbody tr:nth-child(even) {
+    background: rgba(255,255,255,0.05);
+}
+
+/* Ссылки в шапке */
+.admin-table th a {
+    text-decoration: none;
+    color: inherit;
+}
+.admin-table th a:hover {
+    text-decoration: underline;
+}
+.admin-table th a:visited {
+    color: inherit;
+}
+
+/* Пагинация */
+.table-pagination {
+    margin-top: 16px;
+    text-align: right;
+}
+.table-pagination a,
+.table-pagination strong {
+    display: inline-block;
+    padding: 4px 8px;
+    margin: 0 4px;
+    text-decoration: none;
+    color: #4d9eff;
+}
+.table-pagination a:hover {
+    text-decoration: underline;
+}
+.table-pagination a:visited {
+    color: #4d9eff;
+}
+.table-pagination strong {
+    color: #fff;
+    font-weight: bold;
+}
+
+/* Меню действий */
+.action-wrapper {
+    position: relative;
+    display: inline-block;
+}
+.action-btn {
+    cursor: pointer;
+    text-decoration: underline;
+    color: #4d9eff;
+    font-size: 14px;
+}
+.action-wrapper:hover .action-menu {
+    display: block;
+}
+.action-menu {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: 20px;
+    background: #1a2335;
+    border: 1px solid #475d7d;
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0,0,0,.15);
+    z-index: 10;
+}
+.action-menu button {
+    display: block;
+    width: 100%;
+    border: none;
+    background: none;
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 14px;
+    cursor: pointer;
+    color: #fff;
+}
+.action-menu button:hover {
+    background: #22304d;
+}
+.action-menu .red {
+    background: #e05555;
+}
+
+/* Общие кнопки */
+.btn {
+    padding: 8px 12px;
+    border-radius: 4px;
+    border: none;
+    background-color: #2563eb;
+    color: #fff;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color .2s;
+    min-width: 80px;
+    max-width: 170px;
+    margin-top: 5px;
+}
+
+.btn:hover {
+    background-color: #3a8ae8;
+}
+.btn-primary {
+    background-color: #4d9eff;
+}
+.btn-primary:hover {
+    background-color: #3a8ae8;
+}
+
+.page--teams .action-menu {
+    min-width: 180px;
+}
+
+.page--users .action-menu {
+    min-width: 160px;
+}
+
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+    margin-top: 24px;
+}
+.card {
+    border: 1px solid #4a5a75;
+    border-radius: 8px;
+    padding: 14px;
+    background: #1f293e;
+    color: #fff;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, .2);
+}
+.card h4 {
+    margin: 0 0 6px;
+}
+
+label {
+    display: block;
+    margin-bottom: 12px;
+    font-size: 14px;
+}  
+
+input, textarea, select {
+    width:100%;
+    padding:8px; 
+    margin-top:4px;
+    border-radius:4px; 
+    border:1px solid #375176;
+    background:#2a3a5a; 
+    color:#fff;
+}
+
+.page--modCreate #msg p {
+    margin: 8px 0;
+}
+  
+.page--modCreate #msg a {
+    color: #4d9eff;
+    text-decoration: underline;
+}
+
+.role {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 90%;
+}
+
+.role.player {
+    background: #29c97d;
+    color: #fff;
+}
+
+.role.moderator {
+    background: #9b59e0;
+    color: #fff;
+}
+
+.role.admin {
+    background: #e05555;
+    color: #fff;
+}
+
+.btn-danger {
+    background: #e05555;
+    color: #fff;
+}
+
+.btn-danger:hover {
+    background: #c2343f;
+}
+
+.link {
+    color: #4d9eff;
+    text-decoration: none;
+}
+
+.page--profile #pwdMsg, #delMsg {
+    font-size: 14px;
+}

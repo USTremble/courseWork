@@ -5,8 +5,9 @@
   <title>Пользователи</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="/static/css/main.css">
 </head>
-<body>
+<body class="page page--users">
   <nav class="sidebar"><div class="logo">CyberBattle</div><div id="navLinks"></div></nav>
   <header class="topbar">
     <div class="top-title" id="pageTitle">Пользователи</div>
@@ -175,132 +176,5 @@
     load();
   </script>
 
-  <style>
-    .content-box {
-      border: 1px solid #475d7d;
-      border-radius: 8px;
-      padding: 18px;
-      box-shadow: 0 2px 6px rgba(0,0,0,.2);
-      background: #1a2335;
-    }
-    .admin-table {
-      border-collapse: collapse;
-      width: 100%;
-      color: #fff;
-    }
-    .admin-table th, .admin-table td {
-      padding: 8px 12px;
-      border: 1px solid #5e7296;
-      text-align: center;
-    }
-    .admin-table thead {
-      background: #22304d;
-      font-weight: 600;
-    }
-    .admin-table tbody tr:nth-child(even) {
-      background: rgba(255,255,255,0.05);
-    }
-
-    /* подчеркивания опять */
-    .admin-table th a {
-      text-decoration: none;
-      color: inherit;
-    }
-    .admin-table th a:hover {
-      text-decoration: underline;
-      color: inherit;
-    }
-    .admin-table th a:visited {
-      color: inherit;
-    }
-
-    .table-pagination {
-      margin-top: 16px;
-      text-align: right;
-    }
-    .table-pagination a, .table-pagination strong {
-      display: inline-block;
-      padding: 4px 8px;
-      margin: 0 4px;
-      text-decoration: none;
-      color: #4d9eff;
-    }
-    .table-pagination a:hover {
-      text-decoration: underline;
-    }
-    .table-pagination a:visited {
-      color: #4d9eff;
-    }
-    .table-pagination strong {
-      color: #fff;
-      font-weight: bold;
-    }
-
-    /* дизайн кнопок действий */
-    .action-wrapper { position: relative; display: inline-block; }
-    .action-btn {
-      cursor: pointer;
-      text-decoration: underline;
-      color: #4d9eff;
-      font-size: 14px;
-    }
-    .action-menu {
-      display: none;
-      position: absolute;
-      right: 0; top: 20px;
-      background: #1a2335;
-      border: 1px solid #475d7d;
-      border-radius: 6px;
-      box-shadow: 0 2px 6px rgba(0,0,0,.15);
-      min-width: 160px;
-      z-index: 10;
-    }
-    .action-wrapper:hover .action-menu {
-      display: block;
-    }
-    .action-menu button {
-      display: block;
-      width: 100%;
-      border: none;
-      background: none;
-      text-align: left;
-      padding: 8px 12px;
-      font-size: 14px;
-      cursor: pointer;
-      color: #fff;
-    }
-    .action-menu button:hover {
-      background: #22304d;
-    }
-    .action-menu .red {
-      background: #e05555;
-      color: #fff;
-    }
-
-    .btn {
-    padding: 8px 12px;
-    border-radius: 4px;
-    border: none;
-    background-color: #4d9eff;
-    color: white;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background-color 0.2s;
-    min-width: 80px;  /* Минимальная ширина */
-    max-width: 170px; /* Максимальная ширина */
-  }
-
-  .btn:hover {
-    background-color: #3a8ae8;
-  }
-
-  .btn-primary {
-    background-color: #4d9eff;
-  }
-
-  .btn-primary:hover {
-    background-color: #3a8ae8;
-  }
-  </style>
 </body>
 </html>
