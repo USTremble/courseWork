@@ -12,6 +12,19 @@ CREATE TABLE teams (
     invite_code TEXT UNIQUE
 );
 
+CREATE TABLE events (
+    event_id SERIAL PRIMARY KEY,
+    code TEXT UNIQUE,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    type TEXT CHECK (type IN ('quiz', 'ctf')) NOT NULL,
+    answer TEXT,
+    file_path TEXT,
+    status TEXT CHECK (status IN ('waiting', 'running', 'finished')) DEFAULT 'waiting',
+    created_by INTEGER,
+    FOREIGN KEY (created_by) REFERENCES users(user_id) ON DELETE SET NULL
+);
+
 CREATE TABLE event_teams (
     event_id INTEGER NOT NULL,
     team_id INTEGER NOT NULL,
@@ -20,16 +33,6 @@ CREATE TABLE event_teams (
     PRIMARY KEY (event_id, team_id),
     FOREIGN KEY (event_id) REFERENCES events(event_id) ON DELETE CASCADE,
     FOREIGN KEY (team_id) REFERENCES teams(team_id) ON DELETE CASCADE
-);
-
-CREATE TABLE events (
-    event_id SERIAL PRIMARY KEY,
-    name TEXT NOT NULL UNIQUE,
-    type TEXT CHECK (type IN ('quiz', 'ctf')) NOT NULL,
-    description TEXT,
-    status TEXT CHECK (status IN ('waiting', 'running', 'finished')) DEFAULT 'waiting',
-    answer TEXT,
-    file_path TEXT
 );
 
 CREATE TABLE team_members (

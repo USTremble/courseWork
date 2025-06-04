@@ -18,7 +18,6 @@
 }
 body {
     display: flex;
-    height: 100vh;
     color: var(--font-light);
     background: var(--bg-blue);
 }
@@ -77,9 +76,10 @@ main {
     margin-left: 60px;
     margin-right: 50px;
     margin-top: 60px;
-    padding: 32px 16px 40px 16px; 
-    overflow: visible;
+    padding: 32px 16px 40px 16px;
+    min-height: calc(100vh - 60px);
 }
+
 h1 { margin-bottom: 12px; font-size: 1.6rem; }
 .content-box {
     background: var(--blue-2);
